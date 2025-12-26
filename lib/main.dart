@@ -192,9 +192,6 @@ class _HomePageState extends State<HomePage> {
       final weatherCode = current?['weathercode'] as int?;
       final humidity = (current?['relative_humidity_2m'] as num?)?.toDouble();
 
-      // PM2.5 / PM10 取 hourly 的第一项（最简单可跑版）
-      final hourly = jsonMap['hourly'] as Map<String, dynamic>?;
-
       final result = WeatherResult(
         temperatureC: temp,
         windKmh: wind,
@@ -213,16 +210,10 @@ class _HomePageState extends State<HomePage> {
   }
 
   String _suggestion(WeatherResult r) {
-    // 超简化版“建议逻辑”：先凑出一个可展示的“智能分析”
     final score = _sportScore(r);
-    if (score < 40) return '不建议户外：选择室内训练（瑜伽/力量）更安全。';
-    if (score < 60) return '一般：建议短时低强度户外，或选择室内。';
-
-    // final pm25 = r.pm25 ?? 0;
-    // final wind = r.windKmh ?? 0;
-    // if (pm25 >= 35) return '空气一般：建议室内训练或轻量散步。';
-    // if (wind >= 30) return '风有点大：建议骑行注意安全，或选择跑步。';
-    return '适合户外运动：可以跑步/骑行。';
+    if (score < 40) return 'Get started!';
+    if (score < 60) return 'Get started!';
+    return '';
   }
 
   ({IconData icon, String label}) _weatherInfo(int? code) {
@@ -247,29 +238,31 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
+  // ✅ 右上角装饰 PNG：根据天气切换（你只有 2 张图，所以先做最小映射）
+  String _weatherDecorAsset(int? code) {
+    if (code == null) return 'lib/assets/weather/cloudy.png';
+    if (code == 0) return 'lib/assets/weather/sunny.png';
+    if (code <= 3) return 'lib/assets/weather/cloudy.png';
+    return 'lib/assets/weather/cloudy.png';
+  }
+
   ({String label, Color color}) _airQualityTag(double? pm25) {
     if (pm25 == null) return (label: 'Unknown', color: Colors.grey);
-
-    // 这里用 WHO 常见分档的“简化版”（可在报告里解释为 MVP）
     if (pm25 < 10) return (label: 'Good', color: Colors.green);
     if (pm25 < 25) return (label: 'Moderate', color: Colors.amber);
     return (label: 'Poor', color: Colors.red);
   }
 
   int _sportScore(WeatherResult r) {
-    // 0~100，越高越适合户外运动
     double score = 100;
 
     final pm25 = r.pm25 ?? 0;
     final wind = r.windKmh ?? 0;
     final code = r.weatherCode ?? 0;
 
-    // PM2.5：越高扣分越多
-    if (pm25 >= 10) score -= (pm25 - 10) * 1.6; // 10→0 扣，越高扣越多
-    // 风：强风扣分
+    if (pm25 >= 10) score -= (pm25 - 10) * 1.6;
     if (wind >= 15) score -= (wind - 15) * 1.2;
 
-    // 天气：雨雪雾扣分
     final isFog = (code == 45 || code == 48);
     final isRain = (code >= 51 && code <= 67) || (code >= 80 && code <= 82);
     final isSnow = (code >= 71 && code <= 77);
@@ -336,225 +329,190 @@ class _HomePageState extends State<HomePage> {
 
                   /// 🌦️ 环境评估卡片
                   Card(
-                    color: const Color(0xFFEEF6DA),
+                    elevation: 0,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(20),
                     ),
-                    child: Padding(
-                      padding: const EdgeInsets.all(16),
-                      child: Column(
+                    clipBehavior: Clip.none, // ✅ 允许溢出（半进半出）
+                    child: Container(
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(20),
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [
+                            Color(0xFFDFF1FC), // 蓝
+                            Color(0xFFBFDFA3), // 稍深的绿
+                          ],
+                        ),
+                      ),
+                      child: Stack(
+                        clipBehavior: Clip.none, // ✅ 允许 Stack 子组件溢出
                         children: [
-                          /// 🧠 Outdoor Score
-                          Builder(
-                            builder: (context) {
-                              final s = _sportScore(r);
-                              final tag = _airQualityTag(r.pm25);
-                              return Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceBetween,
-                                children: [
-                                  const Text('Outdoor Score'),
-                                  Row(
-                                    children: [
-                                      Text(
-                                        '$s/100',
+                          // ✅ 原内容
+                          Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Column(
+                              children: [
+                                /// 🧠 Outdoor Score
+                                Builder(
+                                  builder: (context) {
+                                    final s = _sportScore(r);
+                                    final tag = _airQualityTag(r.pm25);
+                                    return Row(
+                                      mainAxisAlignment:
+                                          MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        const Text('Outdoor Score'),
+                                        Row(
+                                          children: [
+                                            Text(
+                                              '$s/100',
+                                              style: const TextStyle(
+                                                fontWeight: FontWeight.w800,
+                                                fontSize: 16,
+                                              ),
+                                            ),
+                                            const SizedBox(width: 10),
+                                            Container(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    horizontal: 10,
+                                                    vertical: 6,
+                                                  ),
+                                              decoration: BoxDecoration(
+                                                color: tag.color.withOpacity(
+                                                  0.18,
+                                                ),
+                                                borderRadius:
+                                                    BorderRadius.circular(999),
+                                              ),
+                                              child: Text(
+                                                _scoreText(s),
+                                                style: TextStyle(
+                                                  fontWeight: FontWeight.w700,
+                                                  color: tag.color,
+                                                  fontSize: 12,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ],
+                                    );
+                                  },
+                                ),
+
+                                const SizedBox(height: 10),
+
+                                Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    // 左：温度
+                                    Expanded(
+                                      child: Text(
+                                        r.temperatureC == null
+                                            ? '—'
+                                            : '${r.temperatureC!.toStringAsFixed(1)} °C',
                                         style: const TextStyle(
+                                          fontSize: 44,
                                           fontWeight: FontWeight.w800,
-                                          fontSize: 16,
+                                          letterSpacing: -1.2,
                                         ),
                                       ),
-                                      const SizedBox(width: 10),
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 10,
-                                          vertical: 6,
-                                        ),
-                                        decoration: BoxDecoration(
-                                          color: tag.color.withOpacity(0.18),
-                                          borderRadius: BorderRadius.circular(
-                                            999,
-                                          ),
-                                        ),
-                                        child: Text(
-                                          _scoreText(s),
-                                          style: TextStyle(
+                                    ),
+
+                                    // 右：图片 + 文字（同一列，靠右）
+                                    Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.end,
+                                      children: [
+                                        const SizedBox(height: 12),
+                                        Text(
+                                          _weatherInfo(r.weatherCode).label,
+                                          style: const TextStyle(
                                             fontWeight: FontWeight.w700,
-                                            color: tag.color,
-                                            fontSize: 12,
+                                            fontSize: 14,
+                                            height: 1.0,
                                           ),
                                         ),
-                                      ),
-                                    ],
-                                  ),
-                                ],
-                              );
-                            },
-                          ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
 
-                          const SizedBox(height: 10),
+                                const SizedBox(height: 12),
 
-                          _InfoRow(
-                            label: 'Temperature',
-                            value: r.temperatureC?.toStringAsFixed(1),
-                            unit: '°C',
-                          ),
-                          _InfoRow(
-                            label: 'Wind',
-                            value: r.windKmh?.toStringAsFixed(1),
-                            unit: 'km/h',
-                          ),
-
-                          /// ☁️ 天气
-                          Builder(
-                            builder: (context) {
-                              final info = _weatherInfo(r.weatherCode);
-                              return Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceBetween,
-                                children: [
-                                  const Text('Weather'),
-                                  Row(
-                                    children: [
-                                      Icon(
-                                        info.icon,
-                                        size: 30,
-                                        color: const Color.fromARGB(
-                                          221,
-                                          240,
-                                          113,
-                                          219,
-                                        ),
-                                      ),
-                                      const SizedBox(width: 6),
-                                      Text(
-                                        info.label,
-                                        style: const TextStyle(
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ],
-                              );
-                            },
-                          ),
-
-                          _InfoRow(
-                            label: 'Humidity',
-                            value: r.humidity?.toStringAsFixed(0),
-                            unit: '%',
-                          ),
-
-                          const Divider(height: 24),
-
-                          /// 🟢 PM2.5
-                          Builder(
-                            builder: (context) {
-                              final tag = _airQualityTag(r.pm25);
-                              final v = r.pm25;
-                              return Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceBetween,
-                                children: [
-                                  const Text('PM2.5'),
-                                  Row(
-                                    children: [
-                                      Text(
-                                        v == null
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: _MiniStatCard(
+                                        title: 'Wind',
+                                        value: r.windKmh == null
                                             ? '—'
-                                            : '${v.toStringAsFixed(1)} µg/m³',
-                                        style: const TextStyle(
-                                          fontWeight: FontWeight.w600,
-                                        ),
+                                            : r.windKmh!.toStringAsFixed(1),
+                                        unit: 'km/h',
                                       ),
-                                      const SizedBox(width: 10),
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 10,
-                                          vertical: 6,
-                                        ),
-                                        decoration: BoxDecoration(
-                                          color: tag.color.withOpacity(0.18),
-                                          borderRadius: BorderRadius.circular(
-                                            999,
-                                          ),
-                                          border: Border.all(
-                                            color: tag.color.withOpacity(0.35),
-                                          ),
-                                        ),
-                                        child: Text(
-                                          tag.label,
-                                          style: TextStyle(
-                                            color: tag.color,
-                                            fontWeight: FontWeight.w700,
-                                            fontSize: 12,
-                                          ),
-                                        ),
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: _MiniStatCard(
+                                        title: 'Humidity',
+                                        value: r.humidity == null
+                                            ? '—'
+                                            : r.humidity!.toStringAsFixed(0),
+                                        unit: '%',
+                                        background: const Color(0xFFD9F0A7),
                                       ),
-                                    ],
-                                  ),
-                                ],
-                              );
-                            },
+                                    ),
+                                    const SizedBox(width: 10),
+                                    Expanded(
+                                      child: Builder(
+                                        builder: (context) {
+                                          final pmTag = _airQualityTag(r.pm25);
+                                          return _MiniStatCard(
+                                            title: 'PM2.5',
+                                            value: r.pm25 == null
+                                                ? '—'
+                                                : r.pm25!.toStringAsFixed(1),
+                                            unit: 'µg/m³',
+                                            badgeText: pmTag.label,
+                                            badgeColor: pmTag.color,
+                                          );
+                                        },
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
                           ),
 
-                          Builder(
-                            builder: (context) {
-                              final tag = _airQualityTag(r.pm10);
-                              final v = r.pm10;
-                              return Row(
-                                mainAxisAlignment:
-                                    MainAxisAlignment.spaceBetween,
-                                children: [
-                                  const Text('PM10'),
-                                  Row(
-                                    children: [
-                                      Text(
-                                        v == null
-                                            ? '—'
-                                            : '${v.toStringAsFixed(1)} µg/m³',
-                                        style: const TextStyle(
-                                          fontWeight: FontWeight.w600,
-                                        ),
-                                      ),
-                                      const SizedBox(width: 10),
-                                      Container(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 10,
-                                          vertical: 6,
-                                        ),
-                                        decoration: BoxDecoration(
-                                          color: tag.color.withOpacity(0.18),
-                                          borderRadius: BorderRadius.circular(
-                                            999,
-                                          ),
-                                          border: Border.all(
-                                            color: tag.color.withOpacity(0.35),
-                                          ),
-                                        ),
-                                        child: Text(
-                                          tag.label,
-                                          style: TextStyle(
-                                            color: tag.color,
-                                            fontWeight: FontWeight.w700,
-                                            fontSize: 12,
-                                          ),
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ],
-                              );
-                            },
+                          // ✅ 右上角装饰 PNG（半进半出）
+                          Positioned(
+                            right: -36,
+                            top: -46,
+                            child: IgnorePointer(
+                              ignoring: true,
+                              child: Opacity(
+                                opacity: 01.00,
+                                child: Image.asset(
+                                  _weatherDecorAsset(r.weatherCode),
+                                  width: 230,
+                                  height: 175,
+                                  fit: BoxFit.contain,
+                                ),
+                              ),
+                            ),
                           ),
                         ],
                       ),
                     ),
                   ),
-
                   const SizedBox(height: 16),
 
-                  /// 🏃 建议卡片
+                  /// 🏃 Get started 卡片
                   Card(
                     color: AppColors.primary,
                     elevation: 0,
@@ -562,19 +520,19 @@ class _HomePageState extends State<HomePage> {
                       borderRadius: BorderRadius.circular(22),
                     ),
                     child: Padding(
-                      padding: const EdgeInsets.all(16),
+                      padding: const EdgeInsets.symmetric(vertical: 16),
                       child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center, // ✅ 整体居中
                         children: [
                           const Icon(Icons.directions_run, color: Colors.white),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Text(
-                              '建议：${_suggestion(r)}',
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 16,
-                                fontWeight: FontWeight.w700,
-                              ),
+                          const SizedBox(width: 10),
+                          const Text(
+                            'Get started >>',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 0.2,
                             ),
                           ),
                         ],
@@ -661,15 +619,153 @@ class WeatherResult {
   });
 }
 
+/// ✅ 改好的 MiniStatCard：
+/// - 不再用 FittedBox 缩整行（防止 PM2.5 看起来更小）
+/// - 数字大、单位小（视觉统一）
+/// - badge 有最小宽高（不会“缩成一小坨”）
+class _MiniStatCard extends StatelessWidget {
+  final String title;
+  final String value;
+  final String unit;
+  final Color? background;
+
+  final String? badgeText;
+  final Color? badgeColor;
+
+  const _MiniStatCard({
+    required this.title,
+    required this.value,
+    required this.unit,
+    this.background,
+    this.badgeText,
+    this.badgeColor,
+    super.key,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final t = Theme.of(context).textTheme;
+
+    return Stack(
+      children: [
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+          decoration: BoxDecoration(
+            color: background ?? Colors.white,
+            borderRadius: BorderRadius.circular(20),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.06),
+                blurRadius: 10,
+                offset: const Offset(0, 4),
+              ),
+            ],
+          ),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Text(
+                title,
+                textAlign: TextAlign.center,
+                style: t.labelMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                  color: Colors.black.withOpacity(0.6),
+                ),
+              ),
+              const SizedBox(height: 10),
+
+              // ✅ 数字大、单位小，字号统一
+              Text.rich(
+                TextSpan(
+                  children: [
+                    const TextSpan(
+                      text: '',
+                      style: TextStyle(), // 占位，避免某些主题 null 报警
+                    ),
+                    TextSpan(
+                      text: value,
+                      style: const TextStyle(
+                        fontSize: 26,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -0.4,
+                      ),
+                    ),
+                    TextSpan(
+                      text: ' $unit',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.black.withOpacity(0.7),
+                      ),
+                    ),
+                  ],
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        ),
+
+        // ✅ 右上角标签（最小宽高 + 稳定 pill）
+        if (badgeText != null && badgeText!.isNotEmpty)
+          Positioned(
+            right: 8,
+            top: 8,
+            child: Container(
+              constraints: const BoxConstraints(minWidth: 64),
+              height: 24,
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              decoration: BoxDecoration(
+                color: (badgeColor ?? Colors.black).withOpacity(0.12),
+                borderRadius: BorderRadius.circular(999),
+                border: Border.all(
+                  color: (badgeColor ?? Colors.black).withOpacity(0.25),
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 7,
+                    height: 7,
+                    decoration: BoxDecoration(
+                      color: badgeColor ?? Colors.black,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    badgeText!,
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: badgeColor ?? Colors.black,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
 class _InfoRow extends StatelessWidget {
   final String label;
   final String? value;
   final String unit;
+  final bool highlight;
 
   const _InfoRow({
     required this.label,
     required this.value,
     required this.unit,
+    this.highlight = false,
   });
 
   @override
@@ -681,7 +777,13 @@ class _InfoRow extends StatelessWidget {
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Text(label),
-          Text(text, style: const TextStyle(fontWeight: FontWeight.w600)),
+          Text(
+            text,
+            style: TextStyle(
+              fontSize: highlight ? 36 : 14,
+              fontWeight: highlight ? FontWeight.w700 : FontWeight.w600,
+            ),
+          ),
         ],
       ),
     );
@@ -693,10 +795,8 @@ class MapPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Milan center
     final milan = LatLng(45.4642, 9.1900);
 
-    // 一条“示例跑步路线”（后面你们可以换成真实路线规划 API）
     final route = <LatLng>[
       LatLng(45.4642, 9.1900),
       LatLng(45.4680, 9.1950),
@@ -710,16 +810,11 @@ class MapPage extends StatelessWidget {
       body: FlutterMap(
         options: MapOptions(initialCenter: milan, initialZoom: 13),
         children: [
-          // OpenStreetMap tiles
           TileLayer(
             urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
             userAgentPackageName: 'com.example.cityzen',
           ),
-
-          // Route polyline
           PolylineLayer(polylines: [Polyline(points: route, strokeWidth: 5)]),
-
-          // Marker
           MarkerLayer(
             markers: [
               Marker(

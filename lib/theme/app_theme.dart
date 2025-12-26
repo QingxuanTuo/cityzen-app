@@ -25,6 +25,7 @@ class AppTheme {
       useMaterial3: true,
       colorScheme: colorScheme,
       scaffoldBackgroundColor: Colors.white,
+      fontFamily: 'Inter',
 
       // ✅ 用你原来这套：CardThemeData（避免你遇到的类型报错）
       cardTheme: CardThemeData(
