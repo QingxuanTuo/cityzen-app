@@ -5,6 +5,9 @@ import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
 import 'package:cityzen/theme/app_theme.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:cityzen/ai_service.dart';
+import 'package:cityzen/environment_data.dart';
+import 'package:cityzen/ai_config.dart';
 
 void main() {
   debugPrint('CITYZEN MAIN LOADED');
@@ -72,6 +75,7 @@ class _HomePageState extends State<HomePage> {
   bool _loading = false;
   String? _error;
   WeatherResult? _result;
+  final EnvironmentDataManager _envManager = EnvironmentDataManager();
 
   @override
   void initState() {
@@ -202,6 +206,9 @@ class _HomePageState extends State<HomePage> {
       );
 
       setState(() => _result = result);
+      
+      // 同步数据到全局管理器
+      _envManager.updateData(EnvironmentData.fromWeatherResult(result));
     } catch (e) {
       setState(() => _error = e.toString());
     } finally {
@@ -601,23 +608,7 @@ class _HomePageState extends State<HomePage> {
   }
 }
 
-class WeatherResult {
-  final double? temperatureC;
-  final double? windKmh;
-  final int? weatherCode;
-  final double? pm25;
-  final double? pm10;
-  final double? humidity;
 
-  WeatherResult({
-    required this.temperatureC,
-    required this.windKmh,
-    required this.weatherCode,
-    required this.pm25,
-    required this.pm10,
-    required this.humidity,
-  });
-}
 
 /// ✅ 改好的 MiniStatCard：
 /// - 不再用 FittedBox 缩整行（防止 PM2.5 看起来更小）
@@ -831,30 +822,1701 @@ class MapPage extends StatelessWidget {
   }
 }
 
-class ActivityPage extends StatelessWidget {
+class ActivityPage extends StatefulWidget {
   const ActivityPage({super.key});
+
   @override
-  Widget build(BuildContext context) =>
-      const _CenterText('Activity\n(Workout log later)');
+  State<ActivityPage> createState() => _ActivityPageState();
 }
 
-class SettingsPage extends StatelessWidget {
-  const SettingsPage({super.key});
+class _ActivityPageState extends State<ActivityPage> {
+  bool _isWorkoutActive = false;
+  String _activeWorkoutType = '';
+  DateTime? _workoutStartTime;
+  List<WorkoutSession> _recentSessions = [];
+  bool _showAIChat = false;
+  final TextEditingController _chatController = TextEditingController();
+  final List<ChatMessage> _chatMessages = [];
+  late final GeminiAIService _aiService;
+  bool _isAILoading = false;
+  final EnvironmentDataManager _envManager = EnvironmentDataManager();
+
+  // 当前环境数据（从全局管理器获取）
+  EnvironmentData? get _currentEnvironmentData => _envManager.currentData;
+
+  @override
+  void initState() {
+    super.initState();
+    _aiService = GeminiAIService();
+    _loadRecentSessions();
+    _addWelcomeMessage();
+    
+    // 监听环境数据变化
+    _envManager.addListener(_onEnvironmentDataChanged);
+    
+    // 刷新AI配置
+    _refreshAIService();
+  }
+
+  Future<void> _refreshAIService() async {
+    await _aiService.refreshConfig();
+  }
+
+  @override
+  void dispose() {
+    _envManager.removeListener(_onEnvironmentDataChanged);
+    super.dispose();
+  }
+
+  void _onEnvironmentDataChanged() {
+    if (mounted) {
+      setState(() {
+        // 环境数据更新时刷新UI
+      });
+    }
+  }
+
+  void _addWelcomeMessage() {
+    _chatMessages.add(ChatMessage(
+      text: "Hi! I'm your AI fitness coach powered by Google Gemini. I analyze real-time environmental data to give you personalized workout recommendations. What would you like to know about exercising today?",
+      isUser: false,
+      timestamp: DateTime.now(),
+    ));
+  }
+
+  Future<void> _loadRecentSessions() async {
+    // 模拟加载历史数据
+    setState(() {
+      _recentSessions = [
+        WorkoutSession(
+          id: '1',
+          type: 'Running',
+          date: DateTime.now().subtract(const Duration(days: 1)),
+          duration: const Duration(minutes: 30),
+          distance: 5.2,
+          environmentScore: 85,
+        ),
+        WorkoutSession(
+          id: '2',
+          type: 'Cycling',
+          date: DateTime.now().subtract(const Duration(days: 3)),
+          duration: const Duration(minutes: 45),
+          distance: 12.8,
+          environmentScore: 72,
+        ),
+        WorkoutSession(
+          id: '3',
+          type: 'Yoga',
+          date: DateTime.now().subtract(const Duration(days: 5)),
+          duration: const Duration(minutes: 60),
+          distance: 0,
+          environmentScore: 90,
+        ),
+      ];
+    });
+  }
+
+  void _startWorkout(String type) {
+    setState(() {
+      _isWorkoutActive = true;
+      _activeWorkoutType = type;
+      _workoutStartTime = DateTime.now();
+    });
+    
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Started $type workout!'),
+        backgroundColor: AppColors.primary,
+        action: SnackBarAction(
+          label: 'Stop',
+          textColor: Colors.white,
+          onPressed: _stopWorkout,
+        ),
+      ),
+    );
+  }
+
+  void _stopWorkout() {
+    if (_workoutStartTime != null) {
+      final duration = DateTime.now().difference(_workoutStartTime!);
+      setState(() {
+        _isWorkoutActive = false;
+        _recentSessions.insert(0, WorkoutSession(
+          id: DateTime.now().millisecondsSinceEpoch.toString(),
+          type: _activeWorkoutType,
+          date: _workoutStartTime!,
+          duration: duration,
+          distance: 2.5, // 模拟数据
+          environmentScore: 78,
+        ));
+        _activeWorkoutType = '';
+        _workoutStartTime = null;
+      });
+    }
+  }
+
+  Future<void> _sendChatMessage(String message) async {
+    if (message.trim().isEmpty) return;
+
+    setState(() {
+      _chatMessages.add(ChatMessage(
+        text: message,
+        isUser: true,
+        timestamp: DateTime.now(),
+      ));
+      _isAILoading = true;
+    });
+
+    _chatController.clear();
+
+    try {
+      final envData = _currentEnvironmentData;
+      
+      // 使用真实的环境数据或提示用户刷新
+      if (envData == null || _envManager.isDataStale) {
+        setState(() {
+          _chatMessages.add(ChatMessage(
+            text: "I notice the environmental data might be outdated. Please go to the Home page and refresh the data for the most accurate recommendations.",
+            isUser: false,
+            timestamp: DateTime.now(),
+          ));
+          _isAILoading = false;
+        });
+        return;
+      }
+
+      // 使用真实的Gemini AI服务
+      final aiResponse = await _aiService.getWorkoutAdvice(
+        userMessage: message,
+        pm25: envData.pm25,
+        pm10: envData.pm10,
+        windSpeed: envData.windKmh,
+        temperature: envData.temperatureC,
+        weatherCode: envData.weatherCode,
+        city: 'Milan',
+      );
+      
+      setState(() {
+        _chatMessages.add(ChatMessage(
+          text: aiResponse,
+          isUser: false,
+          timestamp: DateTime.now(),
+        ));
+        _isAILoading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _chatMessages.add(ChatMessage(
+          text: "Sorry, I'm having trouble connecting right now. Please try again in a moment.",
+          isUser: false,
+          timestamp: DateTime.now(),
+        ));
+        _isAILoading = false;
+      });
+    }
+  }
+
+  String _generateAIResponse(String userMessage) {
+    final message = userMessage.toLowerCase();
+    
+    if (message.contains('weather') || message.contains('air quality')) {
+      return "Based on current conditions (PM2.5: 75 µg/m³), I'd recommend indoor activities like yoga or light stretching. The air quality is moderate today, so if you do go outside, consider shorter, less intense workouts.";
+    } else if (message.contains('running') || message.contains('run')) {
+      return "For running today, I suggest early morning (6-8 AM) when air quality is typically better. Keep your pace moderate and consider a shorter route. Would you like me to suggest a specific route based on current wind patterns?";
+    } else if (message.contains('cycling') || message.contains('bike')) {
+      return "Cycling could work today, but avoid busy roads due to air quality. I recommend park routes or bike paths. The wind speed is moderate, so you might face some resistance heading north.";
+    } else if (message.contains('yoga') || message.contains('indoor')) {
+      return "Perfect choice! Indoor yoga is ideal for today's conditions. I can guide you through a 30-minute session focused on breathing exercises, which is great when outdoor air quality isn't optimal.";
+    } else if (message.contains('plan') || message.contains('schedule')) {
+      return "Based on your activity history and this week's forecast, I suggest: Monday/Wednesday - Indoor yoga, Tuesday/Thursday - Early morning runs, Friday - Cycling in the park. This balances your fitness goals with environmental conditions.";
+    } else {
+      return "I'm here to help you make smart fitness decisions based on environmental data. You can ask me about workout recommendations, timing, or how weather affects different activities. What specific activity are you considering?";
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Settings')),
-      body: const Padding(
-        padding: EdgeInsets.all(16),
-        child: Text(
-          'Roadmap (Next steps):\n\n'
-          '• City selection (Milan / Rome / etc.)\n'
-          '• Personalized air-quality thresholds\n'
-          '• AI-based activity recommendations\n'
-          '• Data visualization & history\n'
-          '• Final report & presentation\n',
-          style: TextStyle(fontSize: 16),
+      appBar: AppBar(
+        title: const Text('Activity'),
+        actions: [
+          IconButton(
+            icon: Icon(_showAIChat ? Icons.close : Icons.smart_toy),
+            onPressed: () => setState(() => _showAIChat = !_showAIChat),
+          ),
+        ],
+      ),
+      body: _showAIChat ? _buildAIChat() : _buildMainContent(),
+      floatingActionButton: _isWorkoutActive 
+        ? FloatingActionButton.extended(
+            onPressed: _stopWorkout,
+            backgroundColor: Colors.red,
+            icon: const Icon(Icons.stop),
+            label: Text('Stop ${_activeWorkoutType}'),
+          )
+        : null,
+    );
+  }
+
+  Widget _buildMainContent() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // 今日状态卡片
+          _buildTodayStatusCard(),
+          
+          const SizedBox(height: 20),
+          
+          // 快速开始运动
+          _buildQuickStartSection(),
+          
+          const SizedBox(height: 24),
+          
+          // AI推荐
+          _buildAIRecommendationCard(),
+          
+          const SizedBox(height: 24),
+          
+          // 最近活动
+          _buildRecentActivitiesSection(),
+          
+          const SizedBox(height: 24),
+          
+          // 统计概览
+          _buildStatsOverview(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildTodayStatusCard() {
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(20),
+          gradient: LinearGradient(
+            colors: [AppColors.primary.withOpacity(0.1), AppColors.sky],
+          ),
+        ),
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text(
+                  'Today\'s Activity',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: AppColors.primary,
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: const Text(
+                    'Active',
+                    style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: _buildStatusItem('Steps', '8,432', Icons.directions_walk),
+                ),
+                Expanded(
+                  child: _buildStatusItem('Calories', '342', Icons.local_fire_department),
+                ),
+                Expanded(
+                  child: _buildStatusItem('Time', '45m', Icons.timer),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatusItem(String label, String value, IconData icon) {
+    return Column(
+      children: [
+        Icon(icon, color: AppColors.primary, size: 24),
+        const SizedBox(height: 8),
+        Text(
+          value,
+          style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
+        ),
+        Text(
+          label,
+          style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildQuickStartSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Quick Start',
+          style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+        ),
+        const SizedBox(height: 12),
+        Row(
+          children: [
+            Expanded(
+              child: _buildQuickStartCard('Running', Icons.directions_run, AppColors.primary),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _buildQuickStartCard('Cycling', Icons.pedal_bike, Colors.blue),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: _buildQuickStartCard('Yoga', Icons.self_improvement, Colors.purple),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildQuickStartCard(String title, IconData icon, Color color) {
+    return GestureDetector(
+      onTap: () => _startWorkout(title),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: color.withOpacity(0.3)),
+        ),
+        child: Column(
+          children: [
+            Icon(icon, color: color, size: 32),
+            const SizedBox(height: 8),
+            Text(
+              title,
+              style: TextStyle(
+                fontWeight: FontWeight.w600,
+                color: color,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildAIRecommendationCard() {
+    final envData = _currentEnvironmentData;
+    String recommendationText = "Loading environmental data...";
+    
+    if (envData == null) {
+      recommendationText = "Environmental data not available. Please refresh data on the Home page to get personalized recommendations.";
+    } else if (_envManager.isDataStale) {
+      recommendationText = "Environmental data is outdated. Please refresh on the Home page for current recommendations.";
+    } else {
+      final pm25 = envData.pm25;
+      if (pm25 != null) {
+        if (pm25 > 50) {
+          recommendationText = "Poor air quality today (PM2.5: ${pm25.toStringAsFixed(1)} µg/m³). Indoor activities strongly recommended for your safety.";
+        } else if (pm25 > 25) {
+          recommendationText = "Moderate air quality today (PM2.5: ${pm25.toStringAsFixed(1)} µg/m³). Consider shorter outdoor sessions or indoor alternatives.";
+        } else if (pm25 > 10) {
+          recommendationText = "Good air quality today (PM2.5: ${pm25.toStringAsFixed(1)} µg/m³). Outdoor activities are recommended, but avoid peak traffic hours.";
+        } else {
+          recommendationText = "Excellent air quality today (PM2.5: ${pm25.toStringAsFixed(1)} µg/m³)! Perfect conditions for any outdoor activity.";
+        }
+        
+        // 添加温度信息
+        if (envData.temperatureC != null) {
+          final temp = envData.temperatureC!;
+          if (temp < 5) {
+            recommendationText += " Cold weather (${temp.toStringAsFixed(1)}°C) - dress warmly and warm up thoroughly.";
+          } else if (temp > 25) {
+            recommendationText += " Warm weather (${temp.toStringAsFixed(1)}°C) - stay hydrated and avoid peak sun hours.";
+          } else {
+            recommendationText += " Comfortable temperature (${temp.toStringAsFixed(1)}°C) for outdoor activities.";
+          }
+        }
+      }
+    }
+
+    return Card(
+      elevation: 0,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      child: Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(20),
+          gradient: LinearGradient(
+            colors: [Colors.orange.withOpacity(0.1), Colors.pink.withOpacity(0.1)],
+          ),
+        ),
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.smart_toy, color: Colors.orange[700]),
+                const SizedBox(width: 8),
+                const Text(
+                  'AI Coach Recommendation',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                ),
+                const Spacer(),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.green.withOpacity(0.2),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Text(
+                    'Gemini 3.0',
+                    style: TextStyle(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                      color: Colors.green,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              recommendationText,
+              style: const TextStyle(height: 1.4),
+            ),
+            const SizedBox(height: 16),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton.icon(
+                onPressed: () => setState(() => _showAIChat = true),
+                icon: const Icon(Icons.chat),
+                label: const Text('Chat with AI Coach'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.orange[700],
+                  side: BorderSide(color: Colors.orange[700]!),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRecentActivitiesSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            const Text(
+              'Recent Activities',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+            ),
+            TextButton(
+              onPressed: () {},
+              child: const Text('View All'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        ..._recentSessions.take(3).map((session) => _buildActivityTile(session)),
+      ],
+    );
+  }
+
+  Widget _buildActivityTile(WorkoutSession session) {
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: ListTile(
+        leading: CircleAvatar(
+          backgroundColor: _getActivityColor(session.type).withOpacity(0.1),
+          child: Icon(
+            _getActivityIcon(session.type),
+            color: _getActivityColor(session.type),
+          ),
+        ),
+        title: Text(session.type),
+        subtitle: Text(
+          '${session.duration.inMinutes}min • ${session.distance.toStringAsFixed(1)}km',
+        ),
+        trailing: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(
+              '${session.environmentScore}/100',
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
+            Text(
+              'Env Score',
+              style: TextStyle(fontSize: 10, color: Colors.grey[600]),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatsOverview() {
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'This Week',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 16),
+            Row(
+              children: [
+                Expanded(
+                  child: _buildStatItem('Workouts', '5', Icons.fitness_center),
+                ),
+                Expanded(
+                  child: _buildStatItem('Total Time', '3h 45m', Icons.schedule),
+                ),
+                Expanded(
+                  child: _buildStatItem('Distance', '28.5km', Icons.straighten),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatItem(String label, String value, IconData icon) {
+    return Column(
+      children: [
+        Icon(icon, color: AppColors.primary),
+        const SizedBox(height: 8),
+        Text(
+          value,
+          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+        ),
+        Text(
+          label,
+          style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildAIChat() {
+    return Column(
+      children: [
+        Expanded(
+          child: ListView.builder(
+            padding: const EdgeInsets.all(16),
+            reverse: false, // 改为正序显示
+            itemCount: _chatMessages.length + (_isAILoading ? 1 : 0),
+            itemBuilder: (context, index) {
+              if (index == _chatMessages.length && _isAILoading) {
+                return _buildLoadingBubble();
+              }
+              final message = _chatMessages[index];
+              return _buildChatBubble(message);
+            },
+          ),
+        ),
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.1),
+                blurRadius: 10,
+                offset: const Offset(0, -2),
+              ),
+            ],
+          ),
+          child: Column(
+            children: [
+              // 环境数据显示
+              Container(
+                padding: const EdgeInsets.all(12),
+                margin: const EdgeInsets.only(bottom: 12),
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: _currentEnvironmentData != null 
+                  ? Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceAround,
+                      children: [
+                        _buildEnvDataChip('PM2.5', '${_currentEnvironmentData!.pm25?.toStringAsFixed(1) ?? '--'}'),
+                        _buildEnvDataChip('Wind', '${_currentEnvironmentData!.windKmh?.toStringAsFixed(1) ?? '--'} km/h'),
+                        _buildEnvDataChip('Temp', '${_currentEnvironmentData!.temperatureC?.toStringAsFixed(1) ?? '--'}°C'),
+                      ],
+                    )
+                  : const Text(
+                      'Environmental data not available. Please refresh on Home page.',
+                      style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic),
+                      textAlign: TextAlign.center,
+                    ),
+              ),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _chatController,
+                      decoration: InputDecoration(
+                        hintText: 'Ask your AI coach...',
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(25),
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 12,
+                        ),
+                      ),
+                      onSubmitted: _isAILoading ? null : _sendChatMessage,
+                      enabled: !_isAILoading,
+                      maxLines: null, // 允许多行输入
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  FloatingActionButton(
+                    mini: true,
+                    onPressed: _isAILoading ? null : () => _sendChatMessage(_chatController.text),
+                    child: _isAILoading 
+                      ? const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.send),
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildEnvDataChip(String label, String value) {
+    return Column(
+      children: [
+        Text(
+          value,
+          style: const TextStyle(
+            fontWeight: FontWeight.w700,
+            fontSize: 14,
+          ),
+        ),
+        Text(
+          label,
+          style: TextStyle(
+            fontSize: 10,
+            color: Colors.grey[600],
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildLoadingBubble() {
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.all(12),
+        constraints: BoxConstraints(
+          maxWidth: MediaQuery.of(context).size.width * 0.8,
+        ),
+        decoration: BoxDecoration(
+          color: Colors.grey[200],
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+            const SizedBox(width: 8),
+            Text(
+              'AI is thinking...',
+              style: TextStyle(
+                color: Colors.grey[600],
+                fontStyle: FontStyle.italic,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildChatBubble(ChatMessage message) {
+    return Align(
+      alignment: message.isUser ? Alignment.centerRight : Alignment.centerLeft,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        padding: const EdgeInsets.all(16),
+        constraints: BoxConstraints(
+          maxWidth: MediaQuery.of(context).size.width * 0.85,
+          minHeight: 40,
+        ),
+        decoration: BoxDecoration(
+          color: message.isUser ? AppColors.primary : Colors.grey[100],
+          borderRadius: BorderRadius.circular(16),
+        ),
+        child: SelectableText(
+          message.text,
+          style: TextStyle(
+            color: message.isUser ? Colors.white : Colors.black87,
+            height: 1.4,
+            fontSize: 14,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Color _getActivityColor(String type) {
+    switch (type) {
+      case 'Running':
+        return AppColors.primary;
+      case 'Cycling':
+        return Colors.blue;
+      case 'Yoga':
+        return Colors.purple;
+      default:
+        return Colors.grey;
+    }
+  }
+
+  IconData _getActivityIcon(String type) {
+    switch (type) {
+      case 'Running':
+        return Icons.directions_run;
+      case 'Cycling':
+        return Icons.pedal_bike;
+      case 'Yoga':
+        return Icons.self_improvement;
+      default:
+        return Icons.fitness_center;
+    }
+  }
+}
+
+class WorkoutSession {
+  final String id;
+  final String type;
+  final DateTime date;
+  final Duration duration;
+  final double distance;
+  final int environmentScore;
+
+  WorkoutSession({
+    required this.id,
+    required this.type,
+    required this.date,
+    required this.duration,
+    required this.distance,
+    required this.environmentScore,
+  });
+}
+
+class ChatMessage {
+  final String text;
+  final bool isUser;
+  final DateTime timestamp;
+
+  ChatMessage({
+    required this.text,
+    required this.isUser,
+    required this.timestamp,
+  });
+}
+
+class SettingsPage extends StatefulWidget {
+  const SettingsPage({super.key});
+
+  @override
+  State<SettingsPage> createState() => _SettingsPageState();
+}
+
+class _SettingsPageState extends State<SettingsPage> {
+  bool _notificationsEnabled = true;
+  bool _locationEnabled = true;
+  bool _darkModeEnabled = false;
+  bool _autoRefresh = true;
+  String _selectedCity = 'Milan';
+  String _temperatureUnit = 'Celsius';
+  String _distanceUnit = 'Kilometers';
+  double _airQualityThreshold = 25.0;
+  double _windSpeedThreshold = 15.0;
+
+  final List<String> _cities = ['Milan', 'Rome', 'Florence', 'Naples', 'Turin'];
+  final List<String> _temperatureUnits = ['Celsius', 'Fahrenheit'];
+  final List<String> _distanceUnits = ['Kilometers', 'Miles'];
+
+  // AI配置相关
+  final AIConfigManager _aiConfigManager = AIConfigManager();
+  final TextEditingController _apiKeyController = TextEditingController();
+  final TextEditingController _customModelController = TextEditingController();
+  final TextEditingController _baseUrlController = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSettings();
+    _loadAIConfig();
+  }
+
+  @override
+  void dispose() {
+    _apiKeyController.dispose();
+    _customModelController.dispose();
+    _baseUrlController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadAIConfig() async {
+    await _aiConfigManager.loadConfig();
+    setState(() {
+      _apiKeyController.text = _aiConfigManager.apiKey;
+      _customModelController.text = _aiConfigManager.model;
+      _baseUrlController.text = _aiConfigManager.baseUrl;
+    });
+  }
+
+  Future<void> _loadSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _notificationsEnabled = prefs.getBool('notifications_enabled') ?? true;
+      _locationEnabled = prefs.getBool('location_enabled') ?? true;
+      _darkModeEnabled = prefs.getBool('dark_mode_enabled') ?? false;
+      _autoRefresh = prefs.getBool('auto_refresh') ?? true;
+      _selectedCity = prefs.getString('selected_city') ?? 'Milan';
+      _temperatureUnit = prefs.getString('temperature_unit') ?? 'Celsius';
+      _distanceUnit = prefs.getString('distance_unit') ?? 'Kilometers';
+      _airQualityThreshold = prefs.getDouble('air_quality_threshold') ?? 25.0;
+      _windSpeedThreshold = prefs.getDouble('wind_speed_threshold') ?? 15.0;
+    });
+  }
+
+  Future<void> _saveSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('notifications_enabled', _notificationsEnabled);
+    await prefs.setBool('location_enabled', _locationEnabled);
+    await prefs.setBool('dark_mode_enabled', _darkModeEnabled);
+    await prefs.setBool('auto_refresh', _autoRefresh);
+    await prefs.setString('selected_city', _selectedCity);
+    await prefs.setString('temperature_unit', _temperatureUnit);
+    await prefs.setString('distance_unit', _distanceUnit);
+    await prefs.setDouble('air_quality_threshold', _airQualityThreshold);
+    await prefs.setDouble('wind_speed_threshold', _windSpeedThreshold);
+  }
+
+  void _showCitySelector() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 40,
+              height: 4,
+              margin: const EdgeInsets.only(top: 12),
+              decoration: BoxDecoration(
+                color: Colors.grey[300],
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const Padding(
+              padding: EdgeInsets.all(20),
+              child: Text(
+                'Select City',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+              ),
+            ),
+            ..._cities.map((city) => ListTile(
+              title: Text(city),
+              trailing: _selectedCity == city 
+                ? Icon(Icons.check, color: AppColors.primary) 
+                : null,
+              onTap: () {
+                setState(() => _selectedCity = city);
+                _saveSettings();
+                Navigator.pop(context);
+              },
+            )),
+            const SizedBox(height: 20),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showThresholdDialog(String type) {
+    final isAirQuality = type == 'air_quality';
+    final currentValue = isAirQuality ? _airQualityThreshold : _windSpeedThreshold;
+    final controller = TextEditingController(text: currentValue.toString());
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text('Set ${isAirQuality ? 'Air Quality' : 'Wind Speed'} Threshold'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: controller,
+              keyboardType: TextInputType.number,
+              decoration: InputDecoration(
+                labelText: isAirQuality ? 'PM2.5 (µg/m³)' : 'Wind Speed (km/h)',
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              isAirQuality 
+                ? 'Activities will be marked as risky above this PM2.5 level'
+                : 'Activities will be marked as risky above this wind speed',
+              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final value = double.tryParse(controller.text);
+              if (value != null && value > 0) {
+                setState(() {
+                  if (isAirQuality) {
+                    _airQualityThreshold = value;
+                  } else {
+                    _windSpeedThreshold = value;
+                  }
+                });
+                _saveSettings();
+                Navigator.pop(context);
+              }
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Settings'),
+        backgroundColor: Colors.white,
+        elevation: 0,
+      ),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Profile Section
+            _SettingsSection(
+              title: 'Profile',
+              children: [
+                _SettingsCard(
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 60,
+                        height: 60,
+                        decoration: BoxDecoration(
+                          color: AppColors.primary.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(30),
+                        ),
+                        child: Icon(
+                          Icons.person,
+                          size: 30,
+                          color: AppColors.primary,
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'CityZen User',
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            SizedBox(height: 4),
+                            Text(
+                              'Health & Fitness Enthusiast',
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: Colors.grey,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Icon(Icons.edit, color: Colors.grey[400]),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+
+            // Location & Data Section
+            _SettingsSection(
+              title: 'Location & Data',
+              children: [
+                _SettingsTile(
+                  icon: Icons.location_city,
+                  title: 'City',
+                  subtitle: _selectedCity,
+                  onTap: _showCitySelector,
+                ),
+                _SettingsTile(
+                  icon: Icons.my_location,
+                  title: 'Location Services',
+                  subtitle: _locationEnabled ? 'Enabled' : 'Disabled',
+                  trailing: Switch(
+                    value: _locationEnabled,
+                    onChanged: (value) {
+                      setState(() => _locationEnabled = value);
+                      _saveSettings();
+                    },
+                    activeColor: AppColors.primary,
+                  ),
+                ),
+                _SettingsTile(
+                  icon: Icons.refresh,
+                  title: 'Auto Refresh Data',
+                  subtitle: _autoRefresh ? 'Every 30 minutes' : 'Manual only',
+                  trailing: Switch(
+                    value: _autoRefresh,
+                    onChanged: (value) {
+                      setState(() => _autoRefresh = value);
+                      _saveSettings();
+                    },
+                    activeColor: AppColors.primary,
+                  ),
+                ),
+              ],
+            ),
+
+            // Units & Preferences Section
+            _SettingsSection(
+              title: 'Units & Preferences',
+              children: [
+                _SettingsTile(
+                  icon: Icons.thermostat,
+                  title: 'Temperature Unit',
+                  subtitle: _temperatureUnit,
+                  onTap: () => _showUnitSelector('temperature'),
+                ),
+                _SettingsTile(
+                  icon: Icons.straighten,
+                  title: 'Distance Unit',
+                  subtitle: _distanceUnit,
+                  onTap: () => _showUnitSelector('distance'),
+                ),
+              ],
+            ),
+
+            // Health Thresholds Section
+            _SettingsSection(
+              title: 'Health Thresholds',
+              children: [
+                _SettingsTile(
+                  icon: Icons.air,
+                  title: 'Air Quality Threshold',
+                  subtitle: '${_airQualityThreshold.toStringAsFixed(1)} µg/m³ PM2.5',
+                  onTap: () => _showThresholdDialog('air_quality'),
+                ),
+                _SettingsTile(
+                  icon: Icons.air,
+                  title: 'Wind Speed Threshold',
+                  subtitle: '${_windSpeedThreshold.toStringAsFixed(1)} km/h',
+                  onTap: () => _showThresholdDialog('wind_speed'),
+                ),
+              ],
+            ),
+
+            // Notifications Section
+            _SettingsSection(
+              title: 'Notifications',
+              children: [
+                _SettingsTile(
+                  icon: Icons.notifications,
+                  title: 'Push Notifications',
+                  subtitle: _notificationsEnabled ? 'Enabled' : 'Disabled',
+                  trailing: Switch(
+                    value: _notificationsEnabled,
+                    onChanged: (value) {
+                      setState(() => _notificationsEnabled = value);
+                      _saveSettings();
+                    },
+                    activeColor: AppColors.primary,
+                  ),
+                ),
+                _SettingsTile(
+                  icon: Icons.schedule,
+                  title: 'Daily Recommendations',
+                  subtitle: 'Get AI-powered activity suggestions',
+                  trailing: Switch(
+                    value: true,
+                    onChanged: (value) {},
+                    activeColor: AppColors.primary,
+                  ),
+                ),
+              ],
+            ),
+
+            // AI Configuration Section
+            _SettingsSection(
+              title: 'AI Configuration',
+              children: [
+                _SettingsTile(
+                  icon: Icons.smart_toy,
+                  title: 'AI Provider',
+                  subtitle: _aiConfigManager.currentProvider.displayName,
+                  onTap: () => _showAIProviderSelector(),
+                ),
+                _SettingsTile(
+                  icon: Icons.key,
+                  title: 'API Key',
+                  subtitle: _aiConfigManager.apiKey.isEmpty 
+                    ? 'Not configured' 
+                    : '${_aiConfigManager.apiKey.substring(0, 8)}...',
+                  onTap: () => _showAPIKeyDialog(),
+                ),
+                if (_aiConfigManager.currentProvider != AIProvider.ollama)
+                  _SettingsTile(
+                    icon: Icons.settings,
+                    title: 'Model Settings',
+                    subtitle: _aiConfigManager.model,
+                    onTap: () => _showModelSettingsDialog(),
+                  ),
+                _SettingsTile(
+                  icon: _aiConfigManager.isConfigured ? Icons.check_circle : Icons.error,
+                  title: 'AI Status',
+                  subtitle: _aiConfigManager.isConfigured ? 'Ready' : 'Not configured',
+                  trailing: Container(
+                    width: 12,
+                    height: 12,
+                    decoration: BoxDecoration(
+                      color: _aiConfigManager.isConfigured ? Colors.green : Colors.red,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+
+            // App Settings Section
+            _SettingsSection(
+              title: 'App Settings',
+              children: [
+                _SettingsTile(
+                  icon: Icons.dark_mode,
+                  title: 'Dark Mode',
+                  subtitle: _darkModeEnabled ? 'Enabled' : 'Disabled',
+                  trailing: Switch(
+                    value: _darkModeEnabled,
+                    onChanged: (value) {
+                      setState(() => _darkModeEnabled = value);
+                      _saveSettings();
+                    },
+                    activeColor: AppColors.primary,
+                  ),
+                ),
+                _SettingsTile(
+                  icon: Icons.language,
+                  title: 'Language',
+                  subtitle: 'English',
+                  onTap: () {},
+                ),
+              ],
+            ),
+
+            // About Section
+            _SettingsSection(
+              title: 'About',
+              children: [
+                _SettingsTile(
+                  icon: Icons.info,
+                  title: 'About CityZen',
+                  subtitle: 'Version 1.0.0',
+                  onTap: () => _showAboutDialog(),
+                ),
+                _SettingsTile(
+                  icon: Icons.privacy_tip,
+                  title: 'Privacy Policy',
+                  subtitle: 'How we protect your data',
+                  onTap: () {},
+                ),
+                _SettingsTile(
+                  icon: Icons.help,
+                  title: 'Help & Support',
+                  subtitle: 'Get help using CityZen',
+                  onTap: () {},
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 32),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showUnitSelector(String type) {
+    final isTemperature = type == 'temperature';
+    final units = isTemperature ? _temperatureUnits : _distanceUnits;
+    final currentUnit = isTemperature ? _temperatureUnit : _distanceUnit;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 40,
+              height: 4,
+              margin: const EdgeInsets.only(top: 12),
+              decoration: BoxDecoration(
+                color: Colors.grey[300],
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(20),
+              child: Text(
+                'Select ${isTemperature ? 'Temperature' : 'Distance'} Unit',
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+              ),
+            ),
+            ...units.map((unit) => ListTile(
+              title: Text(unit),
+              trailing: currentUnit == unit 
+                ? Icon(Icons.check, color: AppColors.primary) 
+                : null,
+              onTap: () {
+                setState(() {
+                  if (isTemperature) {
+                    _temperatureUnit = unit;
+                  } else {
+                    _distanceUnit = unit;
+                  }
+                });
+                _saveSettings();
+                Navigator.pop(context);
+              },
+            )),
+            const SizedBox(height: 20),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showAboutDialog() {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: AppColors.primary,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Icon(Icons.eco, color: Colors.white),
+            ),
+            const SizedBox(width: 12),
+            const Text('CityZen'),
+          ],
+        ),
+        content: const Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Urban Health Companion',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+            ),
+            SizedBox(height: 8),
+            Text(
+              'CityZen helps urban dwellers make informed decisions about outdoor activities by combining real-time environmental data with AI-powered recommendations.',
+            ),
+            SizedBox(height: 16),
+            Text(
+              'Version: 1.0.0\nBuild: 2024.12.26',
+              style: TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+          ],
+        ),
+        actions: [
+          FilledButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Close'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showAIProviderSelector() {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (context) => Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 40,
+              height: 4,
+              margin: const EdgeInsets.only(top: 12),
+              decoration: BoxDecoration(
+                color: Colors.grey[300],
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const Padding(
+              padding: EdgeInsets.all(20),
+              child: Text(
+                'Select AI Provider',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+              ),
+            ),
+            ...AIProvider.values.map((provider) => ListTile(
+              leading: Icon(_getProviderIcon(provider)),
+              title: Text(provider.displayName),
+              subtitle: Text(_aiConfigManager.getConfigHint(provider)),
+              trailing: _aiConfigManager.currentProvider == provider 
+                ? Icon(Icons.check, color: AppColors.primary) 
+                : null,
+              onTap: () async {
+                await _aiConfigManager.saveConfig(provider: provider);
+                setState(() {});
+                Navigator.pop(context);
+              },
+            )),
+            const SizedBox(height: 20),
+          ],
+        ),
+      ),
+    );
+  }
+
+  IconData _getProviderIcon(AIProvider provider) {
+    switch (provider) {
+      case AIProvider.gemini:
+        return Icons.auto_awesome;
+      case AIProvider.openai:
+        return Icons.psychology;
+      case AIProvider.claude:
+        return Icons.chat;
+      case AIProvider.ollama:
+        return Icons.computer;
+    }
+  }
+
+  void _showAPIKeyDialog() {
+    _apiKeyController.text = _aiConfigManager.apiKey;
+    
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Text('${_aiConfigManager.currentProvider.displayName} API Key'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: _apiKeyController,
+              decoration: InputDecoration(
+                labelText: 'API Key',
+                hintText: 'Enter your API key',
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                prefixIcon: const Icon(Icons.key),
+              ),
+              obscureText: true,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              _aiConfigManager.getConfigHint(_aiConfigManager.currentProvider),
+              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              final key = _apiKeyController.text.trim();
+              if (_aiConfigManager.validateApiKey(key, _aiConfigManager.currentProvider)) {
+                await _aiConfigManager.saveConfig(apiKey: key);
+                setState(() {});
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('API Key saved successfully')),
+                );
+              } else {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Invalid API Key format')),
+                );
+              }
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showModelSettingsDialog() {
+    _customModelController.text = _aiConfigManager.model;
+    _baseUrlController.text = _aiConfigManager.baseUrl;
+    
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Advanced AI Settings'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: _customModelController,
+              decoration: InputDecoration(
+                labelText: 'Model Name',
+                hintText: _aiConfigManager.currentProvider.defaultModel,
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                prefixIcon: const Icon(Icons.memory),
+              ),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _baseUrlController,
+              decoration: InputDecoration(
+                labelText: 'Custom Base URL (Optional)',
+                hintText: 'https://api.example.com',
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                prefixIcon: const Icon(Icons.link),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Leave empty to use default settings',
+              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              await _aiConfigManager.saveConfig(
+                customModel: _customModelController.text.trim(),
+                baseUrl: _baseUrlController.text.trim(),
+              );
+              setState(() {});
+              Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Settings saved successfully')),
+              );
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SettingsSection extends StatelessWidget {
+  final String title;
+  final List<Widget> children;
+
+  const _SettingsSection({
+    required this.title,
+    required this.children,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(4, 24, 4, 12),
+          child: Text(
+            title,
+            style: const TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w700,
+              color: AppColors.text,
+            ),
+          ),
+        ),
+        ...children,
+      ],
+    );
+  }
+}
+
+class _SettingsCard extends StatelessWidget {
+  final Widget child;
+
+  const _SettingsCard({required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Colors.grey.withOpacity(0.1)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.04),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: child,
+    );
+  }
+}
+
+class _SettingsTile extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final Widget? trailing;
+  final VoidCallback? onTap;
+
+  const _SettingsTile({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    this.trailing,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return _SettingsCard(
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(16),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 4),
+          child: Row(
+            children: [
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Icon(
+                  icon,
+                  size: 22,
+                  color: AppColors.primary,
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: Colors.grey[600],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (trailing != null) 
+                trailing!
+              else if (onTap != null)
+                Icon(Icons.chevron_right, color: Colors.grey[400]),
+            ],
+          ),
         ),
       ),
     );
