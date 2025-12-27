@@ -9,6 +9,7 @@ import 'package:cityzen/ai_service.dart';
 import 'package:cityzen/environment_data.dart';
 import 'package:cityzen/ai_config.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:fl_chart/fl_chart.dart';
 
 void main() {
   debugPrint('CITYZEN MAIN LOADED');
@@ -39,12 +40,19 @@ class MainShell extends StatefulWidget {
 class _MainShellState extends State<MainShell> {
   int _index = 0;
 
-  static const _pages = [HomePage(), MapPage(), ActivityPage(), SettingsPage()];
-
   @override
   Widget build(BuildContext context) {
+    final pages = [
+      HomePage(
+        onGoActivity: () => setState(() => _index = 2),
+      ), // ✅ 跳到 Activity tab
+      const MapPage(),
+      const ActivityPage(),
+      const SettingsPage(),
+    ];
+
     return Scaffold(
-      body: SafeArea(child: _pages[_index]),
+      body: SafeArea(child: pages[_index]),
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
         onDestinationSelected: (i) => setState(() => _index = i),
@@ -66,7 +74,9 @@ class _MainShellState extends State<MainShell> {
 }
 
 class HomePage extends StatefulWidget {
-  const HomePage({super.key});
+  final VoidCallback? onGoActivity;
+
+  const HomePage({super.key, this.onGoActivity});
 
   @override
   State<HomePage> createState() => _HomePageState();
@@ -123,8 +133,14 @@ class _HomePageState extends State<HomePage> {
                       backgroundColor: AppColors.primary,
                       shape: const StadiumBorder(),
                     ),
-                    onPressed: () => Navigator.pop(context),
-                    child: const Text('Get Started'),
+                    onPressed: () {
+                      Navigator.pop(context); // 先关弹窗
+                      WidgetsBinding.instance.addPostFrameCallback((_) {
+                        widget.onGoActivity?.call(); // 下一帧切 tab
+                      });
+                    },
+
+                    child: const Text('Get Started >>'),
                   ),
                 ),
               ],
@@ -255,10 +271,31 @@ class _HomePageState extends State<HomePage> {
   }
 
   ({String label, Color color}) _airQualityTag(double? pm25) {
-    if (pm25 == null) return (label: 'Unknown', color: Colors.grey);
-    if (pm25 < 10) return (label: 'Good', color: Colors.green);
-    if (pm25 < 25) return (label: 'Moderate', color: Colors.amber);
-    return (label: 'Poor', color: Colors.red);
+    if (pm25 == null) return (label: 'No data', color: Colors.grey);
+
+    // EAQI bands for PM2.5 (µg/m³): 0-5, 6-15, 16-50, 51-90, 91-140, >140
+    if (pm25 <= 5) return (label: 'Good', color: Colors.green);
+    if (pm25 <= 15) return (label: 'Fair', color: Colors.lightGreen);
+    if (pm25 <= 50) return (label: 'Moderate', color: Colors.amber);
+    if (pm25 <= 90) return (label: 'Poor', color: Colors.orange);
+    if (pm25 <= 140) return (label: 'Very poor', color: Colors.red);
+    return (label: 'Extremely poor', color: Colors.purple);
+  }
+
+  String _eaqiAdvice(String eaqiLabel) {
+    switch (eaqiLabel) {
+      case 'Good':
+      case 'Fair':
+        return 'Great day for outdoor workouts.';
+      case 'Moderate':
+        return 'Outdoor OK, avoid peak traffic hours.';
+      case 'Poor':
+      case 'Very poor':
+      case 'Extremely poor':
+        return 'Prefer indoor activities today.';
+      default:
+        return 'Refresh to get current air quality advice.';
+    }
   }
 
   int _sportScore(WeatherResult r) {
@@ -299,16 +336,88 @@ class _HomePageState extends State<HomePage> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('CityZen'),
+        centerTitle: true,
+        title: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 6,
+              height: 6,
+              decoration: BoxDecoration(
+                color: AppColors.primary,
+                shape: BoxShape.circle,
+              ),
+            ),
+            const SizedBox(width: 8),
+            const Text(
+              'CityZen',
+              style: TextStyle(
+                fontSize: 22,
+                fontWeight: FontWeight.w800,
+                letterSpacing: 0.8,
+                color: Colors.black,
+              ),
+            ),
+          ],
+        ),
+
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
             onPressed: _loading ? null : _fetchWeather,
           ),
         ],
+
+        // ✅ AppBar 下方加“定位 pill”，像你参考图那样
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(56),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(color: Colors.black.withOpacity(0.06)),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.06),
+                      blurRadius: 10,
+                      offset: const Offset(0, 4),
+                    ),
+                  ],
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.location_on_outlined,
+                      size: 18,
+                      color: Colors.black.withOpacity(0.75),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Milan',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.w800,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
       ),
+
       body: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
+        padding: const EdgeInsets.fromLTRB(16, 10, 16, 28),
         child: _loading
             ? const SizedBox(
                 height: 300,
@@ -321,19 +430,10 @@ class _HomePageState extends State<HomePage> {
             : Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  /// 📍 城市
-                  Row(
-                    children: [
-                      const Icon(Icons.location_on, size: 20),
-                      const SizedBox(width: 4),
-                      Text(
-                        'Milan',
-                        style: Theme.of(context).textTheme.titleLarge,
-                      ),
-                    ],
-                  ),
-
-                  const SizedBox(height: 12),
+                  // ✅ 顶部 Header：定位 + 问候 + 日期 + 时间（参考图布局）
+                  const SizedBox(height: 0),
+                  _HeaderTop(city: 'Milan'),
+                  const SizedBox(height: 14),
 
                   /// 🌦️ 环境评估卡片
                   Card(
@@ -362,91 +462,57 @@ class _HomePageState extends State<HomePage> {
                             padding: const EdgeInsets.all(16),
                             child: Column(
                               children: [
-                                /// 🧠 Outdoor Score
-                                Builder(
-                                  builder: (context) {
-                                    final s = _sportScore(r);
-                                    final tag = _airQualityTag(r.pm25);
-                                    return Row(
-                                      mainAxisAlignment:
-                                          MainAxisAlignment.spaceBetween,
-                                      children: [
-                                        const Text('Outdoor Score'),
-                                        Row(
+                                const SizedBox(height: 0),
+
+                                Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    // ✅ 左侧：温度 + 描述（改成 Column）
+                                    Expanded(
+                                      child: Align(
+                                        alignment:
+                                            Alignment.centerLeft, // ✅ 强制整组贴左
+                                        child: Column(
+                                          mainAxisSize: MainAxisSize.min,
+                                          crossAxisAlignment: CrossAxisAlignment
+                                              .start, // ✅ 文本左对齐
                                           children: [
                                             Text(
-                                              '$s/100',
+                                              r.temperatureC == null
+                                                  ? '—'
+                                                  : '${r.temperatureC!.toStringAsFixed(1)} °C',
+                                              textAlign: TextAlign
+                                                  .left, // ✅ 确保不是 center
                                               style: const TextStyle(
+                                                fontSize: 44,
                                                 fontWeight: FontWeight.w800,
-                                                fontSize: 16,
+                                                letterSpacing: -1.2,
                                               ),
                                             ),
-                                            const SizedBox(width: 10),
-                                            Container(
-                                              padding:
-                                                  const EdgeInsets.symmetric(
-                                                    horizontal: 10,
-                                                    vertical: 6,
-                                                  ),
-                                              decoration: BoxDecoration(
-                                                color: tag.color.withOpacity(
-                                                  0.18,
-                                                ),
-                                                borderRadius:
-                                                    BorderRadius.circular(999),
-                                              ),
-                                              child: Text(
-                                                _scoreText(s),
-                                                style: TextStyle(
-                                                  fontWeight: FontWeight.w700,
-                                                  color: tag.color,
-                                                  fontSize: 12,
+                                            const SizedBox(height: 6),
+                                            Text(
+                                              _weatherInfo(r.weatherCode).label,
+                                              textAlign: TextAlign
+                                                  .left, // ✅ 确保不是 center
+                                              style: TextStyle(
+                                                fontWeight: FontWeight.w700,
+                                                fontSize: 14,
+                                                height: 1.0,
+                                                color: Colors.black.withOpacity(
+                                                  0.7,
                                                 ),
                                               ),
                                             ),
                                           ],
                                         ),
-                                      ],
-                                    );
-                                  },
-                                ),
-
-                                const SizedBox(height: 10),
-
-                                Row(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    // 左：温度
-                                    Expanded(
-                                      child: Text(
-                                        r.temperatureC == null
-                                            ? '—'
-                                            : '${r.temperatureC!.toStringAsFixed(1)} °C',
-                                        style: const TextStyle(
-                                          fontSize: 44,
-                                          fontWeight: FontWeight.w800,
-                                          letterSpacing: -1.2,
-                                        ),
                                       ),
                                     ),
 
-                                    // 右：图片 + 文字（同一列，靠右）
-                                    Column(
-                                      mainAxisSize: MainAxisSize.min,
-                                      crossAxisAlignment:
-                                          CrossAxisAlignment.end,
-                                      children: [
-                                        const SizedBox(height: 12),
-                                        Text(
-                                          _weatherInfo(r.weatherCode).label,
-                                          style: const TextStyle(
-                                            fontWeight: FontWeight.w700,
-                                            fontSize: 14,
-                                            height: 1.0,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
+                                    // ✅ 右侧：保持空位给装饰图（如果你右上角有 PNG 溢出，这里可以留一点宽度）
+                                    const SizedBox(width: 10),
+
+                                    // 右：图片区域（你原来这个 Column 没内容就别占位了）
+                                    // 如果你不需要任何右侧文字，把它删掉即可
                                   ],
                                 ),
 
@@ -485,8 +551,6 @@ class _HomePageState extends State<HomePage> {
                                                 ? '—'
                                                 : r.pm25!.toStringAsFixed(1),
                                             unit: 'µg/m³',
-                                            badgeText: pmTag.label,
-                                            badgeColor: pmTag.color,
                                           );
                                         },
                                       ),
@@ -519,89 +583,58 @@ class _HomePageState extends State<HomePage> {
                     ),
                   ),
                   const SizedBox(height: 16),
+                  // ✅ EAQI 总览卡片（新加）
+                  Builder(
+                    builder: (context) {
+                      final tag = _airQualityTag(r.pm25);
+                      return _EAQICard(
+                        pm25: r.pm25,
+                        eaqiLabel: tag.label,
+                        eaqiColor: tag.color,
+                        advice: _eaqiAdvice(tag.label),
+                      );
+                    },
+                  ),
 
-                  /// 🏃 Get started 卡片
+                  const SizedBox(height: 8),
+
+                  /// 🏃 Get started 卡片（可点击跳转到 Activity）
                   Card(
                     color: AppColors.primary,
                     elevation: 0,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(22),
                     ),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 16),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center, // ✅ 整体居中
-                        children: [
-                          const Icon(Icons.directions_run, color: Colors.white),
-                          const SizedBox(width: 10),
-                          const Text(
-                            'Get started >>',
-                            style: TextStyle(
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(22),
+                      onTap: widget.onGoActivity, // ✅ 点这里切到 Activity tab
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const Icon(
+                              Icons.directions_run,
                               color: Colors.white,
-                              fontSize: 16,
-                              fontWeight: FontWeight.w700,
-                              letterSpacing: 0.2,
                             ),
-                          ),
-                        ],
+                            const SizedBox(width: 10),
+                            const Text(
+                              'Get started >>',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: 0.2,
+                                fontFamily: 'Inter',
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
 
                   const SizedBox(height: 24),
-
-                  /// ⭐ 推荐活动标题
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        'Recommended Activities',
-                        style: Theme.of(context).textTheme.titleMedium,
-                      ),
-                      TextButton(
-                        onPressed: () {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(
-                              content: Text('Swipe to see more →'),
-                            ),
-                          );
-                        },
-                        child: const Text('See all'),
-                      ),
-                    ],
-                  ),
-
-                  const SizedBox(height: 12),
-
-                  /// 🧩 推荐活动列表
-                  SizedBox(
-                    height: 150,
-                    child: ListView(
-                      scrollDirection: Axis.horizontal,
-                      padding: const EdgeInsets.only(right: 16),
-                      children: [
-                        _ActivityCard(
-                          icon: Icons.directions_run,
-                          title: 'Running',
-                          subtitle: 'Good air quality',
-                          backgroundColor: const Color(0xFFEAF6D5),
-                        ),
-                        _ActivityCard(
-                          icon: Icons.pedal_bike,
-                          title: 'Cycling',
-                          subtitle: 'Low wind',
-                          backgroundColor: const Color(0xFFDFF1FC),
-                        ),
-                        _ActivityCard(
-                          icon: Icons.self_improvement,
-                          title: 'Yoga',
-                          subtitle: 'Indoor option',
-                          backgroundColor: const Color(0xFFFFE6EE),
-                        ),
-                        const SizedBox(width: 12),
-                      ],
-                    ),
-                  ),
                 ],
               ),
       ),
@@ -677,15 +710,16 @@ class _MiniStatCard extends StatelessWidget {
                     TextSpan(
                       text: value,
                       style: const TextStyle(
-                        fontSize: 26,
+                        fontSize: 15,
                         fontWeight: FontWeight.w800,
+                        fontFamily: 'Inter',
                         letterSpacing: -0.4,
                       ),
                     ),
                     TextSpan(
                       text: ' $unit',
                       style: TextStyle(
-                        fontSize: 14,
+                        fontSize: 12,
                         fontWeight: FontWeight.w700,
                         color: Colors.black.withOpacity(0.7),
                       ),
@@ -745,6 +779,112 @@ class _MiniStatCard extends StatelessWidget {
   }
 }
 
+class AirQualityTrend extends StatelessWidget {
+  final List<double> values;
+  final Color color;
+
+  const AirQualityTrend({super.key, required this.values, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    if (values.length < 2) return const SizedBox(height: 50);
+
+    final spots = values
+        .asMap()
+        .entries
+        .map((e) => FlSpot(e.key.toDouble(), e.value))
+        .toList();
+
+    return SizedBox(
+      height: 110,
+      child: LineChart(
+        LineChartData(
+          minX: 0,
+          maxX: (values.length - 1).toDouble(),
+
+          gridData: const FlGridData(show: false),
+          titlesData: FlTitlesData(
+            leftTitles: const AxisTitles(
+              sideTitles: SideTitles(showTitles: false),
+            ),
+            rightTitles: const AxisTitles(
+              sideTitles: SideTitles(showTitles: false),
+            ),
+            topTitles: const AxisTitles(
+              sideTitles: SideTitles(showTitles: false),
+            ),
+            bottomTitles: AxisTitles(
+              sideTitles: SideTitles(
+                showTitles: true,
+                reservedSize: 25, // 底部留一点高度
+                interval: 1,
+                getTitlesWidget: (value, meta) {
+                  const style = TextStyle(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                    color: Color(0xFF9AA0A6),
+                  );
+
+                  final i = value.round();
+
+                  // 12 个点（每 2 小时一个点）
+                  // 0  1  2  3  4  5  6  7  8  9 10 11
+                  // 00 02 04 06 08 10 12 14 16 18 20 22
+                  String? label;
+                  switch (i) {
+                    case 0:
+                      label = '00';
+                      break;
+                    case 2:
+                      label = '04';
+                      break;
+                    case 4:
+                      label = '08';
+                      break;
+                    case 6:
+                      label = '12';
+                      break;
+                    case 8:
+                      label = '16';
+                      break;
+                    case 10:
+                      label = '20';
+                      break;
+                  }
+
+                  if (label == null) return const SizedBox.shrink();
+
+                  return SideTitleWidget(
+                    axisSide: meta.axisSide,
+                    child: Text(label, style: style),
+                  );
+                },
+              ),
+            ),
+          ),
+
+          borderData: FlBorderData(show: false),
+          lineBarsData: [
+            LineChartBarData(
+              spots: spots,
+              isCurved: true,
+              barWidth: 2.5,
+              gradient: const LinearGradient(
+                colors: [
+                  Color(0xFF6CB8FF), // 蓝（接近你天气卡片的 sky）
+                  Color(0xFF86BE24), // 绿（CityZen 主色）
+                ],
+              ),
+
+              dotData: const FlDotData(show: false),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _InfoRow extends StatelessWidget {
   final String label;
   final String? value;
@@ -775,6 +915,209 @@ class _InfoRow extends StatelessWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _HeaderTop extends StatelessWidget {
+  final String city;
+
+  const _HeaderTop({required this.city, super.key});
+
+  String _greeting(DateTime now) {
+    final h = now.hour;
+    if (h < 12) return 'Good Morning!';
+    if (h < 18) return 'Good Afternoon!';
+    return 'Good Evening!';
+  }
+
+  String _weekday(DateTime now) {
+    const names = [
+      'Monday',
+      'Tuesday',
+      'Wednesday',
+      'Thursday',
+      'Friday',
+      'Saturday',
+      'Sunday',
+    ];
+    return names[now.weekday - 1];
+  }
+
+  String _month(DateTime now) {
+    const names = [
+      'January',
+      'February',
+      'March',
+      'April',
+      'May',
+      'June',
+      'July',
+      'August',
+      'September',
+      'October',
+      'November',
+      'December',
+    ];
+    return names[now.month - 1];
+  }
+
+  String _two(int v) => v < 10 ? '0$v' : '$v';
+
+  @override
+  Widget build(BuildContext context) {
+    final now = DateTime.now();
+    final greeting = _greeting(now);
+    final dateLine = '${_weekday(now)}, ${now.day} ${_month(now)} ${now.year}';
+    final timeLine = '${_two(now.hour)}:${_two(now.minute)}';
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // 问候 + 日期（左）  时间（右）
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // 左侧
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    greeting,
+                    style: const TextStyle(
+                      fontSize: 26,
+                      fontWeight: FontWeight.w900,
+                      height: 1.05,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    dateLine,
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w700,
+                      color: Colors.black.withOpacity(0.55),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            const SizedBox(width: 12),
+
+            // 右侧大时间
+            Text(
+              timeLine,
+              style: const TextStyle(
+                fontSize: 34,
+                fontWeight: FontWeight.w900,
+                letterSpacing: -0.8,
+                height: 1.0,
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _EAQICard extends StatelessWidget {
+  final double? pm25;
+  final String eaqiLabel;
+  final Color eaqiColor;
+  final String advice;
+
+  const _EAQICard({
+    required this.pm25,
+    required this.eaqiLabel,
+    required this.eaqiColor,
+    required this.advice,
+    super.key,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      elevation: 0,
+      color: Colors.white,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.black.withOpacity(0.06)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // 第一行：标题 + pill
+            Row(
+              children: [
+                // 小色点（轻量表达状态）
+                Container(
+                  width: 10,
+                  height: 10,
+                  decoration: BoxDecoration(
+                    color: eaqiColor,
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 10),
+
+                const Text(
+                  'Air Quality (EAQI)',
+                  style: TextStyle(fontWeight: FontWeight.w900, fontSize: 14),
+                ),
+
+                const Spacer(),
+
+                // 右侧状态 pill
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: eaqiColor.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(color: eaqiColor.withOpacity(0.20)),
+                  ),
+                  child: Text(
+                    eaqiLabel,
+                    style: TextStyle(
+                      fontWeight: FontWeight.w900,
+                      fontSize: 12,
+                      color: eaqiColor,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 8),
+
+            // 第二行：建议（主文案）
+            Text(
+              advice,
+              style: const TextStyle(
+                fontSize: 14,
+                height: 1.35,
+                fontWeight: FontWeight.w600,
+                color: Color(0xFF2E2E2E),
+              ),
+            ),
+            const SizedBox(height: 20),
+
+            // 小趋势图（示例数据：12个点=一天趋势）
+            AirQualityTrend(
+              values: const [18, 22, 20, 28, 35, 40, 52, 60, 58, 55, 50, 44],
+              color: eaqiColor,
+            ),
+          ],
+        ),
       ),
     );
   }
