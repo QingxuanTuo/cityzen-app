@@ -206,7 +206,7 @@ class _HomePageState extends State<HomePage> {
       );
 
       setState(() => _result = result);
-      
+
       // 同步数据到全局管理器
       _envManager.updateData(EnvironmentData.fromWeatherResult(result));
     } catch (e) {
@@ -608,8 +608,6 @@ class _HomePageState extends State<HomePage> {
   }
 }
 
-
-
 /// ✅ 改好的 MiniStatCard：
 /// - 不再用 FittedBox 缩整行（防止 PM2.5 看起来更小）
 /// - 数字大、单位小（视觉统一）
@@ -781,13 +779,235 @@ class _InfoRow extends StatelessWidget {
   }
 }
 
-class MapPage extends StatelessWidget {
+class MapPage extends StatefulWidget {
   const MapPage({super.key});
 
   @override
-  Widget build(BuildContext context) {
-    final milan = LatLng(45.4642, 9.1900);
+  State<MapPage> createState() => _MapPageState();
+}
 
+class _MapPageState extends State<MapPage> {
+  final _mapController = MapController();
+  String _selectedLayer = 'AQI';
+
+  final _milan = LatLng(45.4642, 9.1900);
+  GridPoint? _centerData;
+  bool _loading = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchCenterData();
+  }
+
+  Future<void> _fetchCenterData() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+
+    try {
+      final data = await _fetchPointData(_milan);
+      setState(() {
+        _centerData = data;
+        _loading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _error = e.toString();
+        _loading = false;
+      });
+    }
+  }
+
+  // 中心点着色：依据当前图层与中心数据
+  Color _centerColor() {
+    final d = _centerData;
+    if (d == null) return Colors.grey;
+
+    switch (_selectedLayer) {
+      case 'AQI':
+        final aqi = d.aqi;
+        if (aqi == null) return Colors.grey;
+        if (aqi <= 50) return Colors.green;
+        if (aqi <= 100) return Colors.yellow;
+        if (aqi <= 150) return Colors.orange;
+        return Colors.red;
+
+      case 'PM2.5':
+        final pm25 = d.pm25;
+        if (pm25 == null) return Colors.grey;
+        if (pm25 < 10) return Colors.green;
+        if (pm25 < 25) return Colors.amber;
+        return Colors.red;
+
+      case 'O₃':
+        final ozone = d.ozone;
+        if (ozone == null) return Colors.grey;
+        if (ozone <= 60) return Colors.green;
+        if (ozone <= 120) return Colors.yellow;
+        if (ozone <= 180) return Colors.orange;
+        return Colors.red;
+
+      case 'Rain':
+        final precip = d.precipitation;
+        if (precip == null) return Colors.grey;
+        if (precip == 0) return Colors.grey[300]!;
+        if (precip < 5) return Colors.lightBlue[200]!;
+        if (precip < 20) return Colors.blue;
+        return Colors.indigo;
+
+      default:
+        return Colors.grey;
+    }
+  }
+
+  Future<GridPoint> _fetchPointData(LatLng point) async {
+    try {
+      // 天气数据
+      final weatherUri = Uri.parse(
+        'https://api.open-meteo.com/v1/forecast'
+        '?latitude=${point.latitude}&longitude=${point.longitude}'
+        '&current=temperature_2m,precipitation,weathercode'
+        '&timezone=auto',
+      );
+
+      // 空气质量数据
+      final aqUri = Uri.parse(
+        'https://air-quality-api.open-meteo.com/v1/air-quality'
+        '?latitude=${point.latitude}&longitude=${point.longitude}'
+        '&current=pm2_5,pm10,ozone'
+        '&timezone=auto',
+      );
+
+      final weatherResp = await http
+          .get(weatherUri)
+          .timeout(const Duration(seconds: 10));
+      final aqResp = await http.get(aqUri).timeout(const Duration(seconds: 10));
+
+      if (weatherResp.statusCode != 200 || aqResp.statusCode != 200) {
+        throw Exception('API request failed');
+      }
+
+      final weatherJson = jsonDecode(weatherResp.body) as Map<String, dynamic>;
+      final aqJson = jsonDecode(aqResp.body) as Map<String, dynamic>;
+
+      final weatherCurrent = weatherJson['current'] as Map<String, dynamic>?;
+      final aqCurrent = aqJson['current'] as Map<String, dynamic>?;
+
+      final temp = (weatherCurrent?['temperature_2m'] as num?)?.toDouble();
+      final precip = (weatherCurrent?['precipitation'] as num?)?.toDouble();
+      final weatherCode = weatherCurrent?['weathercode'] as int?;
+
+      final pm25 = (aqCurrent?['pm2_5'] as num?)?.toDouble();
+      final pm10 = (aqCurrent?['pm10'] as num?)?.toDouble();
+      final ozone = (aqCurrent?['ozone'] as num?)?.toDouble();
+
+      // 简化版AQI计算（基于PM2.5）
+      final aqi = _calculateAQI(pm25);
+
+      return GridPoint(
+        location: point,
+        temperature: temp,
+        precipitation: precip,
+        pm25: pm25,
+        pm10: pm10,
+        ozone: ozone,
+        aqi: aqi,
+        weatherCode: weatherCode,
+      );
+    } catch (e) {
+      // 失败时返回空数据点
+      return GridPoint(location: point);
+    }
+  }
+
+  int? _calculateAQI(double? pm25) {
+    if (pm25 == null) return null;
+    // 简化版 AQI 计算（美国EPA标准）
+    if (pm25 <= 12) return (pm25 / 12 * 50).round();
+    if (pm25 <= 35.4) return (50 + (pm25 - 12) / 23.4 * 50).round();
+    if (pm25 <= 55.4) return (100 + (pm25 - 35.4) / 20 * 50).round();
+    if (pm25 <= 150.4) return (150 + (pm25 - 55.4) / 95 * 50).round();
+    return 200;
+  }
+
+  void _recenterMap() {
+    _mapController.move(_milan, 13);
+  }
+
+  void _onMapTap(TapPosition tapPosition, LatLng point) async {
+    if (!mounted) return;
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => _buildBottomSheet(point, _centerData),
+    );
+  }
+
+  Widget _buildBottomSheet(LatLng point, GridPoint? data) {
+    return Padding(
+      padding: const EdgeInsets.all(20),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Location Details',
+            style: Theme.of(context).textTheme.titleLarge,
+          ),
+          const SizedBox(height: 12),
+          _DetailRow(
+            label: 'Coordinates',
+            value:
+                '${_milan.latitude.toStringAsFixed(4)}, ${_milan.longitude.toStringAsFixed(4)}',
+          ),
+          if (data != null) ...[
+            _DetailRow(
+              label: 'AQI',
+              value: data.aqi != null ? '${data.aqi}' : 'N/A',
+            ),
+            _DetailRow(
+              label: 'PM2.5',
+              value: data.pm25 != null
+                  ? '${data.pm25!.toStringAsFixed(1)} µg/m³'
+                  : 'N/A',
+            ),
+            _DetailRow(
+              label: 'O₃',
+              value: data.ozone != null
+                  ? '${data.ozone!.toStringAsFixed(1)} µg/m³'
+                  : 'N/A',
+            ),
+            _DetailRow(
+              label: 'Temperature',
+              value: data.temperature != null
+                  ? '${data.temperature!.toStringAsFixed(1)}°C'
+                  : 'N/A',
+            ),
+            _DetailRow(
+              label: 'Precipitation',
+              value: data.precipitation != null
+                  ? '${data.precipitation!.toStringAsFixed(1)} mm'
+                  : 'N/A',
+            ),
+          ] else
+            const Text(
+              'Loading data...',
+              style: TextStyle(fontSize: 12, color: Colors.grey),
+            ),
+        ],
+      ),
+    );
+  }
+
+  // 不再着色网格点：仅保留中心点数据
+
+  @override
+  Widget build(BuildContext context) {
     final route = <LatLng>[
       LatLng(45.4642, 9.1900),
       LatLng(45.4680, 9.1950),
@@ -797,25 +1017,317 @@ class MapPage extends StatelessWidget {
     ];
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Map')),
-      body: FlutterMap(
-        options: MapOptions(initialCenter: milan, initialZoom: 13),
-        children: [
-          TileLayer(
-            urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-            userAgentPackageName: 'com.example.cityzen',
+      appBar: AppBar(
+        title: const Text('Map'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            onPressed: _loading ? null : _fetchCenterData,
           ),
-          PolylineLayer(polylines: [Polyline(points: route, strokeWidth: 5)]),
-          MarkerLayer(
-            markers: [
-              Marker(
-                point: milan,
-                width: 40,
-                height: 40,
-                child: const Icon(Icons.location_on, size: 40),
+        ],
+      ),
+      body: Stack(
+        children: [
+          // 地图主体
+          FlutterMap(
+            mapController: _mapController,
+            options: MapOptions(
+              initialCenter: _milan,
+              initialZoom: 13,
+              onTap: _onMapTap,
+            ),
+            children: [
+              TileLayer(
+                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                userAgentPackageName: 'com.example.cityzen',
+              ),
+              PolylineLayer(
+                polylines: [Polyline(points: route, strokeWidth: 5)],
+              ),
+              // 仅显示中心点（米兰）
+              MarkerLayer(
+                markers: [
+                  Marker(
+                    point: _milan,
+                    width: 24,
+                    height: 24,
+                    child: Container(
+                      width: 18,
+                      height: 18,
+                      decoration: BoxDecoration(
+                        color: _centerColor(),
+                        shape: BoxShape.circle,
+                        border: Border.all(color: Colors.white, width: 3),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.25),
+                            blurRadius: 4,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
+
+          // 加载指示器
+          if (_loading)
+            Container(
+              color: Colors.black26,
+              child: const Center(
+                child: Card(
+                  child: Padding(
+                    padding: EdgeInsets.all(20),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        CircularProgressIndicator(),
+                        SizedBox(height: 16),
+                        Text('Loading environmental data...'),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+
+          // 错误提示
+          if (_error != null && !_loading)
+            Positioned(
+              top: 80,
+              left: 16,
+              right: 16,
+              child: Card(
+                color: Colors.red[50],
+                child: Padding(
+                  padding: const EdgeInsets.all(12),
+                  child: Text(
+                    'Error: $_error',
+                    style: TextStyle(color: Colors.red[900]),
+                  ),
+                ),
+              ),
+            ),
+
+          // 顶部：图层切换
+          Positioned(
+            top: 16,
+            left: 16,
+            right: 16,
+            child: _LayerSelector(
+              selectedLayer: _selectedLayer,
+              onLayerChanged: (layer) => setState(() => _selectedLayer = layer),
+            ),
+          ),
+
+          // 右下：定位按钮
+          Positioned(
+            bottom: 120,
+            right: 16,
+            child: FloatingActionButton(
+              heroTag: 'recenter',
+              mini: true,
+              backgroundColor: Colors.white,
+              onPressed: _recenterMap,
+              child: const Icon(Icons.my_location, color: AppColors.primary),
+            ),
+          ),
+
+          // 左下：图例
+          Positioned(
+            bottom: 16,
+            left: 16,
+            child: _MapLegend(layerType: _selectedLayer),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// 图层选择器
+class _LayerSelector extends StatelessWidget {
+  final String selectedLayer;
+  final ValueChanged<String> onLayerChanged;
+
+  const _LayerSelector({
+    required this.selectedLayer,
+    required this.onLayerChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final layers = ['AQI', 'PM2.5', 'O₃', 'Rain'];
+
+    return Container(
+      height: 48,
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        children: layers.map((layer) {
+          final isSelected = layer == selectedLayer;
+          return Expanded(
+            child: GestureDetector(
+              onTap: () => onLayerChanged(layer),
+              child: Container(
+                margin: const EdgeInsets.all(4),
+                decoration: BoxDecoration(
+                  color: isSelected ? AppColors.primary : Colors.transparent,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                alignment: Alignment.center,
+                child: Text(
+                  layer,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w600,
+                    color: isSelected ? Colors.white : Colors.black87,
+                    fontSize: 14,
+                  ),
+                ),
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+}
+
+// 地图图例
+class _MapLegend extends StatelessWidget {
+  final String layerType;
+
+  const _MapLegend({required this.layerType});
+
+  @override
+  Widget build(BuildContext context) {
+    final legend = _getLegendData(layerType);
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(0.1),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Text(
+            legend.title,
+            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12),
+          ),
+          const SizedBox(height: 8),
+          ...legend.items.map((item) {
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 16,
+                    height: 16,
+                    decoration: BoxDecoration(
+                      color: item.color,
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(item.label, style: const TextStyle(fontSize: 11)),
+                ],
+              ),
+            );
+          }),
+        ],
+      ),
+    );
+  }
+
+  ({String title, List<({Color color, String label})> items}) _getLegendData(
+    String layer,
+  ) {
+    switch (layer) {
+      case 'AQI':
+        return (
+          title: 'AQI Index',
+          items: [
+            (color: Colors.green, label: 'Good (0-50)'),
+            (color: Colors.yellow, label: 'Moderate (51-100)'),
+            (color: Colors.orange, label: 'Unhealthy (101-150)'),
+            (color: Colors.red, label: 'Very Unhealthy (151+)'),
+          ],
+        );
+      case 'PM2.5':
+        return (
+          title: 'PM2.5 (µg/m³)',
+          items: [
+            (color: Colors.green, label: 'Good (0-10)'),
+            (color: Colors.amber, label: 'Moderate (10-25)'),
+            (color: Colors.red, label: 'Poor (25+)'),
+          ],
+        );
+      case 'O₃':
+        return (
+          title: 'Ozone (O₃) µg/m³',
+          items: [
+            (color: Colors.green, label: 'Good (0-60)'),
+            (color: Colors.yellow, label: 'Moderate (61-120)'),
+            (color: Colors.orange, label: 'Unhealthy (121-180)'),
+            (color: Colors.red, label: 'Very Unhealthy (181+)'),
+          ],
+        );
+      case 'Rain':
+        return (
+          title: 'Precipitation (mm)',
+          items: [
+            (color: Colors.grey[300]!, label: 'None (0)'),
+            (color: Colors.lightBlue[200]!, label: 'Light (0-5)'),
+            (color: Colors.blue, label: 'Moderate (5-20)'),
+            (color: Colors.indigo, label: 'Heavy (20+)'),
+          ],
+        );
+      default:
+        return (title: 'Unknown', items: []);
+    }
+  }
+}
+
+// Bottom Sheet 详情行
+class _DetailRow extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _DetailRow({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label, style: const TextStyle(color: Colors.black54)),
+          Text(value, style: const TextStyle(fontWeight: FontWeight.w600)),
         ],
       ),
     );
@@ -850,10 +1362,10 @@ class _ActivityPageState extends State<ActivityPage> {
     _aiService = GeminiAIService();
     _loadRecentSessions();
     _addWelcomeMessage();
-    
+
     // 监听环境数据变化
     _envManager.addListener(_onEnvironmentDataChanged);
-    
+
     // 刷新AI配置
     _refreshAIService();
   }
@@ -877,11 +1389,14 @@ class _ActivityPageState extends State<ActivityPage> {
   }
 
   void _addWelcomeMessage() {
-    _chatMessages.add(ChatMessage(
-      text: "Hi! I'm your AI fitness coach powered by Google Gemini. I analyze real-time environmental data to give you personalized workout recommendations. What would you like to know about exercising today?",
-      isUser: false,
-      timestamp: DateTime.now(),
-    ));
+    _chatMessages.add(
+      ChatMessage(
+        text:
+            "Hi! I'm your AI fitness coach powered by Google Gemini. I analyze real-time environmental data to give you personalized workout recommendations. What would you like to know about exercising today?",
+        isUser: false,
+        timestamp: DateTime.now(),
+      ),
+    );
   }
 
   Future<void> _loadRecentSessions() async {
@@ -922,7 +1437,7 @@ class _ActivityPageState extends State<ActivityPage> {
       _activeWorkoutType = type;
       _workoutStartTime = DateTime.now();
     });
-    
+
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text('Started $type workout!'),
@@ -941,14 +1456,17 @@ class _ActivityPageState extends State<ActivityPage> {
       final duration = DateTime.now().difference(_workoutStartTime!);
       setState(() {
         _isWorkoutActive = false;
-        _recentSessions.insert(0, WorkoutSession(
-          id: DateTime.now().millisecondsSinceEpoch.toString(),
-          type: _activeWorkoutType,
-          date: _workoutStartTime!,
-          duration: duration,
-          distance: 2.5, // 模拟数据
-          environmentScore: 78,
-        ));
+        _recentSessions.insert(
+          0,
+          WorkoutSession(
+            id: DateTime.now().millisecondsSinceEpoch.toString(),
+            type: _activeWorkoutType,
+            date: _workoutStartTime!,
+            duration: duration,
+            distance: 2.5, // 模拟数据
+            environmentScore: 78,
+          ),
+        );
         _activeWorkoutType = '';
         _workoutStartTime = null;
       });
@@ -959,11 +1477,9 @@ class _ActivityPageState extends State<ActivityPage> {
     if (message.trim().isEmpty) return;
 
     setState(() {
-      _chatMessages.add(ChatMessage(
-        text: message,
-        isUser: true,
-        timestamp: DateTime.now(),
-      ));
+      _chatMessages.add(
+        ChatMessage(text: message, isUser: true, timestamp: DateTime.now()),
+      );
       _isAILoading = true;
     });
 
@@ -971,15 +1487,18 @@ class _ActivityPageState extends State<ActivityPage> {
 
     try {
       final envData = _currentEnvironmentData;
-      
+
       // 使用真实的环境数据或提示用户刷新
       if (envData == null || _envManager.isDataStale) {
         setState(() {
-          _chatMessages.add(ChatMessage(
-            text: "I notice the environmental data might be outdated. Please go to the Home page and refresh the data for the most accurate recommendations.",
-            isUser: false,
-            timestamp: DateTime.now(),
-          ));
+          _chatMessages.add(
+            ChatMessage(
+              text:
+                  "I notice the environmental data might be outdated. Please go to the Home page and refresh the data for the most accurate recommendations.",
+              isUser: false,
+              timestamp: DateTime.now(),
+            ),
+          );
           _isAILoading = false;
         });
         return;
@@ -995,22 +1514,27 @@ class _ActivityPageState extends State<ActivityPage> {
         weatherCode: envData.weatherCode,
         city: 'Milan',
       );
-      
+
       setState(() {
-        _chatMessages.add(ChatMessage(
-          text: aiResponse,
-          isUser: false,
-          timestamp: DateTime.now(),
-        ));
+        _chatMessages.add(
+          ChatMessage(
+            text: aiResponse,
+            isUser: false,
+            timestamp: DateTime.now(),
+          ),
+        );
         _isAILoading = false;
       });
     } catch (e) {
       setState(() {
-        _chatMessages.add(ChatMessage(
-          text: "Sorry, I'm having trouble connecting right now. Please try again in a moment.",
-          isUser: false,
-          timestamp: DateTime.now(),
-        ));
+        _chatMessages.add(
+          ChatMessage(
+            text:
+                "Sorry, I'm having trouble connecting right now. Please try again in a moment.",
+            isUser: false,
+            timestamp: DateTime.now(),
+          ),
+        );
         _isAILoading = false;
       });
     }
@@ -1018,7 +1542,7 @@ class _ActivityPageState extends State<ActivityPage> {
 
   String _generateAIResponse(String userMessage) {
     final message = userMessage.toLowerCase();
-    
+
     if (message.contains('weather') || message.contains('air quality')) {
       return "Based on current conditions (PM2.5: 75 µg/m³), I'd recommend indoor activities like yoga or light stretching. The air quality is moderate today, so if you do go outside, consider shorter, less intense workouts.";
     } else if (message.contains('running') || message.contains('run')) {
@@ -1047,14 +1571,14 @@ class _ActivityPageState extends State<ActivityPage> {
         ],
       ),
       body: _showAIChat ? _buildAIChat() : _buildMainContent(),
-      floatingActionButton: _isWorkoutActive 
-        ? FloatingActionButton.extended(
-            onPressed: _stopWorkout,
-            backgroundColor: Colors.red,
-            icon: const Icon(Icons.stop),
-            label: Text('Stop ${_activeWorkoutType}'),
-          )
-        : null,
+      floatingActionButton: _isWorkoutActive
+          ? FloatingActionButton.extended(
+              onPressed: _stopWorkout,
+              backgroundColor: Colors.red,
+              icon: const Icon(Icons.stop),
+              label: Text('Stop ${_activeWorkoutType}'),
+            )
+          : null,
     );
   }
 
@@ -1066,24 +1590,24 @@ class _ActivityPageState extends State<ActivityPage> {
         children: [
           // 今日状态卡片
           _buildTodayStatusCard(),
-          
+
           const SizedBox(height: 20),
-          
+
           // 快速开始运动
           _buildQuickStartSection(),
-          
+
           const SizedBox(height: 24),
-          
+
           // AI推荐
           _buildAIRecommendationCard(),
-          
+
           const SizedBox(height: 24),
-          
+
           // 最近活动
           _buildRecentActivitiesSection(),
-          
+
           const SizedBox(height: 24),
-          
+
           // 统计概览
           _buildStatsOverview(),
         ],
@@ -1114,14 +1638,21 @@ class _ActivityPageState extends State<ActivityPage> {
                   style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
                 ),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 6,
+                  ),
                   decoration: BoxDecoration(
                     color: AppColors.primary,
                     borderRadius: BorderRadius.circular(20),
                   ),
                   child: const Text(
                     'Active',
-                    style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
               ],
@@ -1130,14 +1661,20 @@ class _ActivityPageState extends State<ActivityPage> {
             Row(
               children: [
                 Expanded(
-                  child: _buildStatusItem('Steps', '8,432', Icons.directions_walk),
+                  child: _buildStatusItem(
+                    'Steps',
+                    '8,432',
+                    Icons.directions_walk,
+                  ),
                 ),
                 Expanded(
-                  child: _buildStatusItem('Calories', '342', Icons.local_fire_department),
+                  child: _buildStatusItem(
+                    'Calories',
+                    '342',
+                    Icons.local_fire_department,
+                  ),
                 ),
-                Expanded(
-                  child: _buildStatusItem('Time', '45m', Icons.timer),
-                ),
+                Expanded(child: _buildStatusItem('Time', '45m', Icons.timer)),
               ],
             ),
           ],
@@ -1155,10 +1692,7 @@ class _ActivityPageState extends State<ActivityPage> {
           value,
           style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
         ),
-        Text(
-          label,
-          style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-        ),
+        Text(label, style: TextStyle(fontSize: 12, color: Colors.grey[600])),
       ],
     );
   }
@@ -1175,15 +1709,27 @@ class _ActivityPageState extends State<ActivityPage> {
         Row(
           children: [
             Expanded(
-              child: _buildQuickStartCard('Running', Icons.directions_run, AppColors.primary),
+              child: _buildQuickStartCard(
+                'Running',
+                Icons.directions_run,
+                AppColors.primary,
+              ),
             ),
             const SizedBox(width: 12),
             Expanded(
-              child: _buildQuickStartCard('Cycling', Icons.pedal_bike, Colors.blue),
+              child: _buildQuickStartCard(
+                'Cycling',
+                Icons.pedal_bike,
+                Colors.blue,
+              ),
             ),
             const SizedBox(width: 12),
             Expanded(
-              child: _buildQuickStartCard('Yoga', Icons.self_improvement, Colors.purple),
+              child: _buildQuickStartCard(
+                'Yoga',
+                Icons.self_improvement,
+                Colors.purple,
+              ),
             ),
           ],
         ),
@@ -1207,10 +1753,7 @@ class _ActivityPageState extends State<ActivityPage> {
             const SizedBox(height: 8),
             Text(
               title,
-              style: TextStyle(
-                fontWeight: FontWeight.w600,
-                color: color,
-              ),
+              style: TextStyle(fontWeight: FontWeight.w600, color: color),
             ),
           ],
         ),
@@ -1221,33 +1764,42 @@ class _ActivityPageState extends State<ActivityPage> {
   Widget _buildAIRecommendationCard() {
     final envData = _currentEnvironmentData;
     String recommendationText = "Loading environmental data...";
-    
+
     if (envData == null) {
-      recommendationText = "Environmental data not available. Please refresh data on the Home page to get personalized recommendations.";
+      recommendationText =
+          "Environmental data not available. Please refresh data on the Home page to get personalized recommendations.";
     } else if (_envManager.isDataStale) {
-      recommendationText = "Environmental data is outdated. Please refresh on the Home page for current recommendations.";
+      recommendationText =
+          "Environmental data is outdated. Please refresh on the Home page for current recommendations.";
     } else {
       final pm25 = envData.pm25;
       if (pm25 != null) {
         if (pm25 > 50) {
-          recommendationText = "Poor air quality today (PM2.5: ${pm25.toStringAsFixed(1)} µg/m³). Indoor activities strongly recommended for your safety.";
+          recommendationText =
+              "Poor air quality today (PM2.5: ${pm25.toStringAsFixed(1)} µg/m³). Indoor activities strongly recommended for your safety.";
         } else if (pm25 > 25) {
-          recommendationText = "Moderate air quality today (PM2.5: ${pm25.toStringAsFixed(1)} µg/m³). Consider shorter outdoor sessions or indoor alternatives.";
+          recommendationText =
+              "Moderate air quality today (PM2.5: ${pm25.toStringAsFixed(1)} µg/m³). Consider shorter outdoor sessions or indoor alternatives.";
         } else if (pm25 > 10) {
-          recommendationText = "Good air quality today (PM2.5: ${pm25.toStringAsFixed(1)} µg/m³). Outdoor activities are recommended, but avoid peak traffic hours.";
+          recommendationText =
+              "Good air quality today (PM2.5: ${pm25.toStringAsFixed(1)} µg/m³). Outdoor activities are recommended, but avoid peak traffic hours.";
         } else {
-          recommendationText = "Excellent air quality today (PM2.5: ${pm25.toStringAsFixed(1)} µg/m³)! Perfect conditions for any outdoor activity.";
+          recommendationText =
+              "Excellent air quality today (PM2.5: ${pm25.toStringAsFixed(1)} µg/m³)! Perfect conditions for any outdoor activity.";
         }
-        
+
         // 添加温度信息
         if (envData.temperatureC != null) {
           final temp = envData.temperatureC!;
           if (temp < 5) {
-            recommendationText += " Cold weather (${temp.toStringAsFixed(1)}°C) - dress warmly and warm up thoroughly.";
+            recommendationText +=
+                " Cold weather (${temp.toStringAsFixed(1)}°C) - dress warmly and warm up thoroughly.";
           } else if (temp > 25) {
-            recommendationText += " Warm weather (${temp.toStringAsFixed(1)}°C) - stay hydrated and avoid peak sun hours.";
+            recommendationText +=
+                " Warm weather (${temp.toStringAsFixed(1)}°C) - stay hydrated and avoid peak sun hours.";
           } else {
-            recommendationText += " Comfortable temperature (${temp.toStringAsFixed(1)}°C) for outdoor activities.";
+            recommendationText +=
+                " Comfortable temperature (${temp.toStringAsFixed(1)}°C) for outdoor activities.";
           }
         }
       }
@@ -1260,7 +1812,10 @@ class _ActivityPageState extends State<ActivityPage> {
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(20),
           gradient: LinearGradient(
-            colors: [Colors.orange.withOpacity(0.1), Colors.pink.withOpacity(0.1)],
+            colors: [
+              Colors.orange.withOpacity(0.1),
+              Colors.pink.withOpacity(0.1),
+            ],
           ),
         ),
         padding: const EdgeInsets.all(20),
@@ -1277,7 +1832,10 @@ class _ActivityPageState extends State<ActivityPage> {
                 ),
                 const Spacer(),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 4,
+                  ),
                   decoration: BoxDecoration(
                     color: Colors.green.withOpacity(0.2),
                     borderRadius: BorderRadius.circular(12),
@@ -1294,10 +1852,7 @@ class _ActivityPageState extends State<ActivityPage> {
               ],
             ),
             const SizedBox(height: 12),
-            Text(
-              recommendationText,
-              style: const TextStyle(height: 1.4),
-            ),
+            Text(recommendationText, style: const TextStyle(height: 1.4)),
             const SizedBox(height: 16),
             SizedBox(
               width: double.infinity,
@@ -1328,14 +1883,13 @@ class _ActivityPageState extends State<ActivityPage> {
               'Recent Activities',
               style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
             ),
-            TextButton(
-              onPressed: () {},
-              child: const Text('View All'),
-            ),
+            TextButton(onPressed: () {}, child: const Text('View All')),
           ],
         ),
         const SizedBox(height: 12),
-        ..._recentSessions.take(3).map((session) => _buildActivityTile(session)),
+        ..._recentSessions
+            .take(3)
+            .map((session) => _buildActivityTile(session)),
       ],
     );
   }
@@ -1412,10 +1966,7 @@ class _ActivityPageState extends State<ActivityPage> {
           value,
           style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
         ),
-        Text(
-          label,
-          style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-        ),
+        Text(label, style: TextStyle(fontSize: 12, color: Colors.grey[600])),
       ],
     );
   }
@@ -1459,20 +2010,32 @@ class _ActivityPageState extends State<ActivityPage> {
                   color: AppColors.primary.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: _currentEnvironmentData != null 
-                  ? Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceAround,
-                      children: [
-                        _buildEnvDataChip('PM2.5', '${_currentEnvironmentData!.pm25?.toStringAsFixed(1) ?? '--'}'),
-                        _buildEnvDataChip('Wind', '${_currentEnvironmentData!.windKmh?.toStringAsFixed(1) ?? '--'} km/h'),
-                        _buildEnvDataChip('Temp', '${_currentEnvironmentData!.temperatureC?.toStringAsFixed(1) ?? '--'}°C'),
-                      ],
-                    )
-                  : const Text(
-                      'Environmental data not available. Please refresh on Home page.',
-                      style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic),
-                      textAlign: TextAlign.center,
-                    ),
+                child: _currentEnvironmentData != null
+                    ? Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceAround,
+                        children: [
+                          _buildEnvDataChip(
+                            'PM2.5',
+                            '${_currentEnvironmentData!.pm25?.toStringAsFixed(1) ?? '--'}',
+                          ),
+                          _buildEnvDataChip(
+                            'Wind',
+                            '${_currentEnvironmentData!.windKmh?.toStringAsFixed(1) ?? '--'} km/h',
+                          ),
+                          _buildEnvDataChip(
+                            'Temp',
+                            '${_currentEnvironmentData!.temperatureC?.toStringAsFixed(1) ?? '--'}°C',
+                          ),
+                        ],
+                      )
+                    : const Text(
+                        'Environmental data not available. Please refresh on Home page.',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontStyle: FontStyle.italic,
+                        ),
+                        textAlign: TextAlign.center,
+                      ),
               ),
               Row(
                 children: [
@@ -1497,14 +2060,16 @@ class _ActivityPageState extends State<ActivityPage> {
                   const SizedBox(width: 8),
                   FloatingActionButton(
                     mini: true,
-                    onPressed: _isAILoading ? null : () => _sendChatMessage(_chatController.text),
-                    child: _isAILoading 
-                      ? const SizedBox(
-                          width: 20,
-                          height: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.send),
+                    onPressed: _isAILoading
+                        ? null
+                        : () => _sendChatMessage(_chatController.text),
+                    child: _isAILoading
+                        ? const SizedBox(
+                            width: 20,
+                            height: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.send),
                   ),
                 ],
               ),
@@ -1520,18 +2085,9 @@ class _ActivityPageState extends State<ActivityPage> {
       children: [
         Text(
           value,
-          style: const TextStyle(
-            fontWeight: FontWeight.w700,
-            fontSize: 14,
-          ),
+          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
         ),
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 10,
-            color: Colors.grey[600],
-          ),
-        ),
+        Text(label, style: TextStyle(fontSize: 10, color: Colors.grey[600])),
       ],
     );
   }
@@ -1762,17 +2318,19 @@ class _SettingsPageState extends State<SettingsPage> {
                 style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
               ),
             ),
-            ..._cities.map((city) => ListTile(
-              title: Text(city),
-              trailing: _selectedCity == city 
-                ? Icon(Icons.check, color: AppColors.primary) 
-                : null,
-              onTap: () {
-                setState(() => _selectedCity = city);
-                _saveSettings();
-                Navigator.pop(context);
-              },
-            )),
+            ..._cities.map(
+              (city) => ListTile(
+                title: Text(city),
+                trailing: _selectedCity == city
+                    ? Icon(Icons.check, color: AppColors.primary)
+                    : null,
+                onTap: () {
+                  setState(() => _selectedCity = city);
+                  _saveSettings();
+                  Navigator.pop(context);
+                },
+              ),
+            ),
             const SizedBox(height: 20),
           ],
         ),
@@ -1782,14 +2340,18 @@ class _SettingsPageState extends State<SettingsPage> {
 
   void _showThresholdDialog(String type) {
     final isAirQuality = type == 'air_quality';
-    final currentValue = isAirQuality ? _airQualityThreshold : _windSpeedThreshold;
+    final currentValue = isAirQuality
+        ? _airQualityThreshold
+        : _windSpeedThreshold;
     final controller = TextEditingController(text: currentValue.toString());
 
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Text('Set ${isAirQuality ? 'Air Quality' : 'Wind Speed'} Threshold'),
+        title: Text(
+          'Set ${isAirQuality ? 'Air Quality' : 'Wind Speed'} Threshold',
+        ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -1798,14 +2360,16 @@ class _SettingsPageState extends State<SettingsPage> {
               keyboardType: TextInputType.number,
               decoration: InputDecoration(
                 labelText: isAirQuality ? 'PM2.5 (µg/m³)' : 'Wind Speed (km/h)',
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
               ),
             ),
             const SizedBox(height: 12),
             Text(
-              isAirQuality 
-                ? 'Activities will be marked as risky above this PM2.5 level'
-                : 'Activities will be marked as risky above this wind speed',
+              isAirQuality
+                  ? 'Activities will be marked as risky above this PM2.5 level'
+                  : 'Activities will be marked as risky above this wind speed',
               style: TextStyle(fontSize: 12, color: Colors.grey[600]),
             ),
           ],
@@ -1965,7 +2529,8 @@ class _SettingsPageState extends State<SettingsPage> {
                 _SettingsTile(
                   icon: Icons.air,
                   title: 'Air Quality Threshold',
-                  subtitle: '${_airQualityThreshold.toStringAsFixed(1)} µg/m³ PM2.5',
+                  subtitle:
+                      '${_airQualityThreshold.toStringAsFixed(1)} µg/m³ PM2.5',
                   onTap: () => _showThresholdDialog('air_quality'),
                 ),
                 _SettingsTile(
@@ -2020,9 +2585,9 @@ class _SettingsPageState extends State<SettingsPage> {
                 _SettingsTile(
                   icon: Icons.key,
                   title: 'API Key',
-                  subtitle: _aiConfigManager.apiKey.isEmpty 
-                    ? 'Not configured' 
-                    : '${_aiConfigManager.apiKey.substring(0, 8)}...',
+                  subtitle: _aiConfigManager.apiKey.isEmpty
+                      ? 'Not configured'
+                      : '${_aiConfigManager.apiKey.substring(0, 8)}...',
                   onTap: () => _showAPIKeyDialog(),
                 ),
                 if (_aiConfigManager.currentProvider != AIProvider.ollama)
@@ -2033,14 +2598,20 @@ class _SettingsPageState extends State<SettingsPage> {
                     onTap: () => _showModelSettingsDialog(),
                   ),
                 _SettingsTile(
-                  icon: _aiConfigManager.isConfigured ? Icons.check_circle : Icons.error,
+                  icon: _aiConfigManager.isConfigured
+                      ? Icons.check_circle
+                      : Icons.error,
                   title: 'AI Status',
-                  subtitle: _aiConfigManager.isConfigured ? 'Ready' : 'Not configured',
+                  subtitle: _aiConfigManager.isConfigured
+                      ? 'Ready'
+                      : 'Not configured',
                   trailing: Container(
                     width: 12,
                     height: 12,
                     decoration: BoxDecoration(
-                      color: _aiConfigManager.isConfigured ? Colors.green : Colors.red,
+                      color: _aiConfigManager.isConfigured
+                          ? Colors.green
+                          : Colors.red,
                       shape: BoxShape.circle,
                     ),
                   ),
@@ -2135,26 +2706,31 @@ class _SettingsPageState extends State<SettingsPage> {
               padding: const EdgeInsets.all(20),
               child: Text(
                 'Select ${isTemperature ? 'Temperature' : 'Distance'} Unit',
-                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
             ),
-            ...units.map((unit) => ListTile(
-              title: Text(unit),
-              trailing: currentUnit == unit 
-                ? Icon(Icons.check, color: AppColors.primary) 
-                : null,
-              onTap: () {
-                setState(() {
-                  if (isTemperature) {
-                    _temperatureUnit = unit;
-                  } else {
-                    _distanceUnit = unit;
-                  }
-                });
-                _saveSettings();
-                Navigator.pop(context);
-              },
-            )),
+            ...units.map(
+              (unit) => ListTile(
+                title: Text(unit),
+                trailing: currentUnit == unit
+                    ? Icon(Icons.check, color: AppColors.primary)
+                    : null,
+                onTap: () {
+                  setState(() {
+                    if (isTemperature) {
+                      _temperatureUnit = unit;
+                    } else {
+                      _distanceUnit = unit;
+                    }
+                  });
+                  _saveSettings();
+                  Navigator.pop(context);
+                },
+              ),
+            ),
             const SizedBox(height: 20),
           ],
         ),
@@ -2239,19 +2815,21 @@ class _SettingsPageState extends State<SettingsPage> {
                 style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
               ),
             ),
-            ...AIProvider.values.map((provider) => ListTile(
-              leading: Icon(_getProviderIcon(provider)),
-              title: Text(provider.displayName),
-              subtitle: Text(_aiConfigManager.getConfigHint(provider)),
-              trailing: _aiConfigManager.currentProvider == provider 
-                ? Icon(Icons.check, color: AppColors.primary) 
-                : null,
-              onTap: () async {
-                await _aiConfigManager.saveConfig(provider: provider);
-                setState(() {});
-                Navigator.pop(context);
-              },
-            )),
+            ...AIProvider.values.map(
+              (provider) => ListTile(
+                leading: Icon(_getProviderIcon(provider)),
+                title: Text(provider.displayName),
+                subtitle: Text(_aiConfigManager.getConfigHint(provider)),
+                trailing: _aiConfigManager.currentProvider == provider
+                    ? Icon(Icons.check, color: AppColors.primary)
+                    : null,
+                onTap: () async {
+                  await _aiConfigManager.saveConfig(provider: provider);
+                  setState(() {});
+                  Navigator.pop(context);
+                },
+              ),
+            ),
             const SizedBox(height: 20),
           ],
         ),
@@ -2274,7 +2852,7 @@ class _SettingsPageState extends State<SettingsPage> {
 
   void _showAPIKeyDialog() {
     _apiKeyController.text = _aiConfigManager.apiKey;
-    
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -2288,7 +2866,9 @@ class _SettingsPageState extends State<SettingsPage> {
               decoration: InputDecoration(
                 labelText: 'API Key',
                 hintText: 'Enter your API key',
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
                 prefixIcon: const Icon(Icons.key),
               ),
               obscureText: true,
@@ -2308,7 +2888,10 @@ class _SettingsPageState extends State<SettingsPage> {
           FilledButton(
             onPressed: () async {
               final key = _apiKeyController.text.trim();
-              if (_aiConfigManager.validateApiKey(key, _aiConfigManager.currentProvider)) {
+              if (_aiConfigManager.validateApiKey(
+                key,
+                _aiConfigManager.currentProvider,
+              )) {
                 await _aiConfigManager.saveConfig(apiKey: key);
                 setState(() {});
                 Navigator.pop(context);
@@ -2331,7 +2914,7 @@ class _SettingsPageState extends State<SettingsPage> {
   void _showModelSettingsDialog() {
     _customModelController.text = _aiConfigManager.model;
     _baseUrlController.text = _aiConfigManager.baseUrl;
-    
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -2345,7 +2928,9 @@ class _SettingsPageState extends State<SettingsPage> {
               decoration: InputDecoration(
                 labelText: 'Model Name',
                 hintText: _aiConfigManager.currentProvider.defaultModel,
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
                 prefixIcon: const Icon(Icons.memory),
               ),
             ),
@@ -2355,7 +2940,9 @@ class _SettingsPageState extends State<SettingsPage> {
               decoration: InputDecoration(
                 labelText: 'Custom Base URL (Optional)',
                 hintText: 'https://api.example.com',
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
                 prefixIcon: const Icon(Icons.link),
               ),
             ),
@@ -2395,10 +2982,7 @@ class _SettingsSection extends StatelessWidget {
   final String title;
   final List<Widget> children;
 
-  const _SettingsSection({
-    required this.title,
-    required this.children,
-  });
+  const _SettingsSection({required this.title, required this.children});
 
   @override
   Widget build(BuildContext context) {
@@ -2482,11 +3066,7 @@ class _SettingsTile extends StatelessWidget {
                   color: AppColors.primary.withOpacity(0.1),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: Icon(
-                  icon,
-                  size: 22,
-                  color: AppColors.primary,
-                ),
+                child: Icon(icon, size: 22, color: AppColors.primary),
               ),
               const SizedBox(width: 16),
               Expanded(
@@ -2503,15 +3083,12 @@ class _SettingsTile extends StatelessWidget {
                     const SizedBox(height: 2),
                     Text(
                       subtitle,
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: Colors.grey[600],
-                      ),
+                      style: TextStyle(fontSize: 14, color: Colors.grey[600]),
                     ),
                   ],
                 ),
               ),
-              if (trailing != null) 
+              if (trailing != null)
                 trailing!
               else if (onTap != null)
                 Icon(Icons.chevron_right, color: Colors.grey[400]),
@@ -2585,4 +3162,27 @@ class _ActivityCard extends StatelessWidget {
       ),
     );
   }
+}
+
+// 网格点数据模型
+class GridPoint {
+  final LatLng location;
+  final double? temperature;
+  final double? precipitation;
+  final double? pm25;
+  final double? pm10;
+  final double? ozone;
+  final int? aqi;
+  final int? weatherCode;
+
+  GridPoint({
+    required this.location,
+    this.temperature,
+    this.precipitation,
+    this.pm25,
+    this.pm10,
+    this.ozone,
+    this.aqi,
+    this.weatherCode,
+  });
 }
