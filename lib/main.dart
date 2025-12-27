@@ -8,6 +8,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cityzen/ai_service.dart';
 import 'package:cityzen/environment_data.dart';
 import 'package:cityzen/ai_config.dart';
+import 'package:geolocator/geolocator.dart';
 
 void main() {
   debugPrint('CITYZEN MAIN LOADED');
@@ -791,9 +792,13 @@ class _MapPageState extends State<MapPage> {
   String _selectedLayer = 'AQI';
 
   final _milan = LatLng(45.4642, 9.1900);
+  // 当前“中心数据/标记”的位置，初始为米兰
+  late LatLng _center = _milan;
   GridPoint? _centerData;
   bool _loading = false;
   String? _error;
+  double _currentZoom = 13.0;
+  LatLng _currentCenter = const LatLng(45.4642, 9.1900);
 
   @override
   void initState() {
@@ -808,7 +813,7 @@ class _MapPageState extends State<MapPage> {
     });
 
     try {
-      final data = await _fetchPointData(_milan);
+      final data = await _fetchPointData(_center);
       setState(() {
         _centerData = data;
         _loading = false;
@@ -934,10 +939,62 @@ class _MapPageState extends State<MapPage> {
   }
 
   void _recenterMap() {
+    _mapController.move(_center, 13);
+  }
+
+  void _recenterToDefault() {
+    if (!mounted) return;
+    setState(() {
+      _center = _milan;
+      _currentCenter = _milan;
+    });
     _mapController.move(_milan, 13);
+    _fetchCenterData();
+  }
+
+  Future<void> _recenterToMyLocation() async {
+    try {
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        _recenterToDefault();
+        return;
+      }
+
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        _recenterToDefault();
+        return;
+      }
+
+      final position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      );
+      final userCenter = LatLng(position.latitude, position.longitude);
+      if (!mounted) return;
+      setState(() {
+        _center = userCenter;
+        _currentCenter = userCenter;
+      });
+      _mapController.move(userCenter, _currentZoom);
+      await _fetchCenterData();
+    } catch (_) {
+      _recenterToDefault();
+    }
   }
 
   void _onMapTap(TapPosition tapPosition, LatLng point) async {
+    // 仅在点击接近中心点时显示详情
+    const thresholdDeg = 0.0004; // ~40-50米的经纬度粗略阈值
+    final dist2 = _distanceSquared(point, _center);
+    if (dist2 > thresholdDeg * thresholdDeg) {
+      return; // 点击其他区域不显示
+    }
+
     if (!mounted) return;
     showModalBottomSheet(
       context: context,
@@ -946,6 +1003,12 @@ class _MapPageState extends State<MapPage> {
       ),
       builder: (context) => _buildBottomSheet(point, _centerData),
     );
+  }
+
+  double _distanceSquared(LatLng a, LatLng b) {
+    final dx = a.latitude - b.latitude;
+    final dy = a.longitude - b.longitude;
+    return dx * dx + dy * dy;
   }
 
   Widget _buildBottomSheet(LatLng point, GridPoint? data) {
@@ -963,7 +1026,7 @@ class _MapPageState extends State<MapPage> {
           _DetailRow(
             label: 'Coordinates',
             value:
-                '${_milan.latitude.toStringAsFixed(4)}, ${_milan.longitude.toStringAsFixed(4)}',
+                '${_center.latitude.toStringAsFixed(4)}, ${_center.longitude.toStringAsFixed(4)}',
           ),
           if (data != null) ...[
             _DetailRow(
@@ -1032,9 +1095,25 @@ class _MapPageState extends State<MapPage> {
           FlutterMap(
             mapController: _mapController,
             options: MapOptions(
-              initialCenter: _milan,
+              initialCenter: _center,
               initialZoom: 13,
+              minZoom: 3,
+              maxZoom: 18,
+              interactionOptions: const InteractionOptions(
+                flags:
+                    InteractiveFlag.drag |
+                    InteractiveFlag.flingAnimation |
+                    InteractiveFlag.pinchZoom |
+                    InteractiveFlag.doubleTapZoom |
+                    InteractiveFlag.scrollWheelZoom,
+              ),
               onTap: _onMapTap,
+              onPositionChanged: (position, _) {
+                final z = position.zoom;
+                final c = position.center;
+                if (z != null) _currentZoom = z;
+                if (c != null) _currentCenter = c;
+              },
             ),
             children: [
               TileLayer(
@@ -1048,7 +1127,7 @@ class _MapPageState extends State<MapPage> {
               MarkerLayer(
                 markers: [
                   Marker(
-                    point: _milan,
+                    point: _center,
                     width: 24,
                     height: 24,
                     child: Container(
@@ -1131,8 +1210,34 @@ class _MapPageState extends State<MapPage> {
               heroTag: 'recenter',
               mini: true,
               backgroundColor: Colors.white,
-              onPressed: _recenterMap,
+              onPressed: _recenterToMyLocation,
               child: const Icon(Icons.my_location, color: AppColors.primary),
+            ),
+          ),
+
+          // 右下：缩放按钮
+          Positioned(
+            bottom: 16,
+            right: 16,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                FloatingActionButton(
+                  heroTag: 'zoomIn',
+                  mini: true,
+                  backgroundColor: Colors.white,
+                  onPressed: _zoomIn,
+                  child: const Icon(Icons.add, color: Colors.black87),
+                ),
+                const SizedBox(height: 8),
+                FloatingActionButton(
+                  heroTag: 'zoomOut',
+                  mini: true,
+                  backgroundColor: Colors.white,
+                  onPressed: _zoomOut,
+                  child: const Icon(Icons.remove, color: Colors.black87),
+                ),
+              ],
             ),
           ),
 
@@ -1145,6 +1250,16 @@ class _MapPageState extends State<MapPage> {
         ],
       ),
     );
+  }
+
+  void _zoomIn() {
+    final nextZoom = (_currentZoom + 1).clamp(3.0, 18.0);
+    _mapController.move(_currentCenter, nextZoom);
+  }
+
+  void _zoomOut() {
+    final nextZoom = (_currentZoom - 1).clamp(3.0, 18.0);
+    _mapController.move(_currentCenter, nextZoom);
   }
 }
 
