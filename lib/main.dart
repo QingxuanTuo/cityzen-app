@@ -86,24 +86,29 @@ class _HomePageState extends State<HomePage> {
   bool _loading = false;
   String? _error;
   WeatherResult? _result;
+  bool _welcomeDone = false; // ✅ Welcome 没结束前，不进入首页
+  List<double> _pm25Trend = [];
   final EnvironmentDataManager _envManager = EnvironmentDataManager();
 
   @override
   void initState() {
     super.initState();
-    _fetchWeather(); // 启动时自动加载一次
-    WidgetsBinding.instance.addPostFrameCallback((_) => _showWelcomeOnce());
+
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await _showWelcomeEveryLaunch(); // ✅ 每次启动都弹
+      if (!mounted) return;
+
+      setState(() => _welcomeDone = true); // ✅ 放行进入首页
+      _fetchWeather(); // ✅ 弹窗结束后再加载数据
+    });
   }
 
-  Future<void> _showWelcomeOnce() async {
-    final sp = await SharedPreferences.getInstance();
-    final seen = sp.getBool('seen_welcome') ?? false;
-    if (seen) return;
-
+  Future<void> _showWelcomeEveryLaunch() async {
     if (!mounted) return;
+
     await showDialog(
       context: context,
-      barrierDismissible: false,
+      barrierDismissible: false, // ✅ 必须点按钮才能继续
       builder: (context) {
         return Dialog(
           shape: RoundedRectangleBorder(
@@ -115,16 +120,24 @@ class _HomePageState extends State<HomePage> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  'Welcome to CityZen',
-                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
-                ),
-                const SizedBox(height: 10),
-                const Text(
-                  'We use weather + air quality to help you choose the best time for outdoor activities.',
-                  style: TextStyle(height: 1.35),
+                Center(
+                  child: Image.asset(
+                    'lib/assets/logo/cityzen_logo.png',
+                    height: 96, // 弹窗里可以比 AppBar 大一点
+                    fit: BoxFit.contain,
+                  ),
                 ),
                 const SizedBox(height: 16),
+
+                const Center(
+                  child: Text(
+                    'Welcome to CityZen',
+                    style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
+                  ),
+                ),
+
+                const SizedBox(height: 10),
+
                 SizedBox(
                   width: double.infinity,
                   height: 48,
@@ -133,14 +146,8 @@ class _HomePageState extends State<HomePage> {
                       backgroundColor: AppColors.primary,
                       shape: const StadiumBorder(),
                     ),
-                    onPressed: () {
-                      Navigator.pop(context); // 先关弹窗
-                      WidgetsBinding.instance.addPostFrameCallback((_) {
-                        widget.onGoActivity?.call(); // 下一帧切 tab
-                      });
-                    },
-
-                    child: const Text('Get Started >>'),
+                    onPressed: () => Navigator.pop(context), // ✅ 只负责关闭
+                    child: const Text('Enter >>'),
                   ),
                 ),
               ],
@@ -149,8 +156,6 @@ class _HomePageState extends State<HomePage> {
         );
       },
     );
-
-    await sp.setBool('seen_welcome', true);
   }
 
   Future<void> _fetchWeather() async {
@@ -197,6 +202,22 @@ class _HomePageState extends State<HomePage> {
 
       final pm25 = latestNonNull(aqHourly?['pm2_5'] as List?);
       final pm10 = latestNonNull(aqHourly?['pm10'] as List?);
+      final pm25List = (aqHourly?['pm2_5'] as List?) ?? [];
+      final trend = pm25List
+          .where((e) => e is num)
+          .map((e) => (e as num).toDouble())
+          .toList();
+
+      // 你图表是 12 个点：00,02,...22（每2小时一个点）
+      // 所以从 hourly（24个点）里每隔2个取1个，最多取12个
+      final sampled = <double>[];
+      for (int i = 0; i < trend.length && sampled.length < 12; i += 2) {
+        sampled.add(trend[i]);
+      }
+
+      setState(() {
+        _pm25Trend = sampled;
+      });
 
       debugPrint('AQ pm2_5=$pm25 pm10=$pm10');
 
@@ -262,11 +283,48 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  // ✅ 右上角装饰 PNG：根据天气切换（你只有 2 张图，所以先做最小映射）
+  // ✅ 右上角装饰 PNG：根据 Open-Meteo weathercode 映射
   String _weatherDecorAsset(int? code) {
-    if (code == null) return 'lib/assets/weather/cloudy.png';
-    if (code == 0) return 'lib/assets/weather/sunny.png';
-    if (code <= 3) return 'lib/assets/weather/cloudy.png';
+    if (code == null) {
+      return 'lib/assets/weather/cloudy.png';
+    }
+
+    // Clear / Sunny
+    if (code == 0) {
+      return 'lib/assets/weather/sunny.png';
+    }
+
+    // Mainly clear, partly cloudy, overcast
+    if (code >= 1 && code <= 3) {
+      return 'lib/assets/weather/cloudy.png';
+    }
+
+    // Fog
+    if (code == 45 || code == 48) {
+      return 'lib/assets/weather/fog.png';
+    }
+
+    // Drizzle
+    if (code >= 51 && code <= 57) {
+      return 'lib/assets/weather/drizzle.png';
+    }
+
+    // Rain / Showers
+    if ((code >= 61 && code <= 67) || (code >= 80 && code <= 82)) {
+      return 'lib/assets/weather/showers.png';
+    }
+
+    // Snow
+    if ((code >= 71 && code <= 77) || (code >= 85 && code <= 86)) {
+      return 'lib/assets/weather/snow.png';
+    }
+
+    // Thunderstorm
+    if (code >= 95 && code <= 99) {
+      return 'lib/assets/weather/flightning.png';
+    }
+
+    // Fallback
     return 'lib/assets/weather/cloudy.png';
   }
 
@@ -333,6 +391,13 @@ class _HomePageState extends State<HomePage> {
   @override
   Widget build(BuildContext context) {
     final r = _result;
+    if (!_welcomeDone) {
+      return const Scaffold(
+        body: SizedBox.expand(
+          child: Center(child: CircularProgressIndicator()),
+        ),
+      );
+    }
 
     return Scaffold(
       appBar: AppBar(
@@ -340,15 +405,12 @@ class _HomePageState extends State<HomePage> {
         title: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Container(
-              width: 6,
-              height: 6,
-              decoration: BoxDecoration(
-                color: AppColors.primary,
-                shape: BoxShape.circle,
-              ),
+            Image.asset(
+              'lib/assets/logo/cityzen_logo.png',
+              height: 40, // ✅ 控制 logo 大小（重点）
+              fit: BoxFit.contain,
             ),
-            const SizedBox(width: 8),
+            const SizedBox(width: 10),
             const Text(
               'CityZen',
               style: TextStyle(
@@ -402,7 +464,7 @@ class _HomePageState extends State<HomePage> {
                     ),
                     const SizedBox(width: 8),
                     Text(
-                      'Milan',
+                      'Milan,Italy',
                       style: const TextStyle(
                         fontWeight: FontWeight.w800,
                         fontSize: 14,
@@ -432,7 +494,7 @@ class _HomePageState extends State<HomePage> {
                 children: [
                   // ✅ 顶部 Header：定位 + 问候 + 日期 + 时间（参考图布局）
                   const SizedBox(height: 0),
-                  _HeaderTop(city: 'Milan'),
+                  _HeaderTop(city: 'Milan,Italy'),
                   const SizedBox(height: 14),
 
                   /// 🌦️ 环境评估卡片
@@ -592,6 +654,7 @@ class _HomePageState extends State<HomePage> {
                         eaqiLabel: tag.label,
                         eaqiColor: tag.color,
                         advice: _eaqiAdvice(tag.label),
+                        trendValues: _pm25Trend,
                       );
                     },
                   ),
@@ -642,10 +705,6 @@ class _HomePageState extends State<HomePage> {
   }
 }
 
-/// ✅ 改好的 MiniStatCard：
-/// - 不再用 FittedBox 缩整行（防止 PM2.5 看起来更小）
-/// - 数字大、单位小（视觉统一）
-/// - badge 有最小宽高（不会“缩成一小坨”）
 class _MiniStatCard extends StatelessWidget {
   final String title;
   final String value;
@@ -1029,12 +1088,13 @@ class _EAQICard extends StatelessWidget {
   final String eaqiLabel;
   final Color eaqiColor;
   final String advice;
-
+  final List<double> trendValues;
   const _EAQICard({
     required this.pm25,
     required this.eaqiLabel,
     required this.eaqiColor,
     required this.advice,
+    required this.trendValues,
     super.key,
   });
 
@@ -1112,10 +1172,7 @@ class _EAQICard extends StatelessWidget {
             const SizedBox(height: 20),
 
             // 小趋势图（示例数据：12个点=一天趋势）
-            AirQualityTrend(
-              values: const [18, 22, 20, 28, 35, 40, 52, 60, 58, 55, 50, 44],
-              color: eaqiColor,
-            ),
+            AirQualityTrend(values: trendValues, color: eaqiColor),
           ],
         ),
       ),
