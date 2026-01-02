@@ -1195,9 +1195,11 @@ class _MapPageState extends State<MapPage> {
   // 当前“中心数据/标记”的位置，初始为米兰
   late LatLng _center = _milan;
   GridPoint? _centerData;
+  List<ParkPoi> _nearbyParks = [];
   bool _loading = false;
+  bool _parksLoading = false;
   String? _error;
-  double _currentZoom = 13.0;
+  double _currentZoom = 15.0;
   LatLng _currentCenter = const LatLng(45.4642, 9.1900);
 
   @override
@@ -1218,11 +1220,28 @@ class _MapPageState extends State<MapPage> {
         _centerData = data;
         _loading = false;
       });
+      // 公园数据异步拉取，不阻塞主加载
+      _loadParks(_center);
     } catch (e) {
       setState(() {
         _error = e.toString();
         _loading = false;
       });
+    }
+  }
+
+  Future<void> _loadParks(LatLng center) async {
+    setState(() => _parksLoading = true);
+    try {
+      final parks = await _fetchParksAround(center);
+      if (!mounted) return;
+      setState(() {
+        _nearbyParks = parks;
+        _parksLoading = false;
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _parksLoading = false);
     }
   }
 
@@ -1325,6 +1344,84 @@ class _MapPageState extends State<MapPage> {
     } catch (e) {
       // 失败时返回空数据点
       return GridPoint(location: point);
+    }
+  }
+
+  Future<List<ParkPoi>> _fetchParksAround(LatLng center) async {
+    const endpoints = [
+      'https://overpass-api.de/api/interpreter',
+      'https://lz4.overpass-api.de/api/interpreter',
+      'https://overpass.kumi.systems/api/interpreter',
+    ];
+
+    final query =
+        '''
+[out:json][timeout:12];
+(
+  node["leisure"="park"](around:2000,${center.latitude},${center.longitude});
+  way["leisure"="park"](around:2000,${center.latitude},${center.longitude});
+  relation["leisure"="park"](around:2000,${center.latitude},${center.longitude});
+);
+out center 30;
+''';
+
+    for (final endpoint in endpoints) {
+      try {
+        final uri = Uri.parse(endpoint);
+        final resp = await http
+            .post(uri, body: {'data': query})
+            .timeout(const Duration(seconds: 12));
+        if (resp.statusCode != 200) continue;
+
+        final parks = _parseOverpassParks(resp.body);
+        if (parks.isNotEmpty) return parks;
+      } catch (_) {
+        // 忽略单个端点失败，尝试下一个
+        continue;
+      }
+    }
+
+    return [];
+  }
+
+  List<ParkPoi> _parseOverpassParks(String body) {
+    try {
+      final json = jsonDecode(body) as Map<String, dynamic>;
+      final elements = (json['elements'] as List?) ?? [];
+
+      final seen = <String>{};
+      final parks = <ParkPoi>[];
+
+      for (final e in elements) {
+        final type = e['type'] as String?;
+        double? lat;
+        double? lon;
+        if (type == 'node') {
+          lat = (e['lat'] as num?)?.toDouble();
+          lon = (e['lon'] as num?)?.toDouble();
+        } else {
+          final centerJson = e['center'] as Map<String, dynamic>?;
+          lat = (centerJson?['lat'] as num?)?.toDouble();
+          lon = (centerJson?['lon'] as num?)?.toDouble();
+        }
+        if (lat == null || lon == null) continue;
+
+        final key = '${lat.toStringAsFixed(5)},${lon.toStringAsFixed(5)}';
+        if (!seen.add(key)) continue;
+
+        final tags = e['tags'] as Map<String, dynamic>?;
+        final name = tags?['name'] as String?;
+        parks.add(
+          ParkPoi(
+            name: name?.isNotEmpty == true ? name! : 'Green area',
+            location: LatLng(lat, lon),
+          ),
+        );
+      }
+
+      return parks;
+    } catch (_) {
+      return [];
     }
   }
 
@@ -1467,18 +1564,8 @@ class _MapPageState extends State<MapPage> {
     );
   }
 
-  // 不再着色网格点：仅保留中心点数据
-
   @override
   Widget build(BuildContext context) {
-    final route = <LatLng>[
-      LatLng(45.4642, 9.1900),
-      LatLng(45.4680, 9.1950),
-      LatLng(45.4705, 9.1895),
-      LatLng(45.4665, 9.1845),
-      LatLng(45.4642, 9.1900),
-    ];
-
     return Scaffold(
       appBar: AppBar(
         title: const Text('Map'),
@@ -1496,7 +1583,7 @@ class _MapPageState extends State<MapPage> {
             mapController: _mapController,
             options: MapOptions(
               initialCenter: _center,
-              initialZoom: 13,
+              initialZoom: 15,
               minZoom: 3,
               maxZoom: 18,
               interactionOptions: const InteractionOptions(
@@ -1517,11 +1604,22 @@ class _MapPageState extends State<MapPage> {
             ),
             children: [
               TileLayer(
+                // 使用默认 OSM 底图
                 urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
                 userAgentPackageName: 'com.example.cityzen',
               ),
-              PolylineLayer(
-                polylines: [Polyline(points: route, strokeWidth: 5)],
+              CircleLayer(
+                circles: _nearbyParks
+                    .map(
+                      (park) => CircleMarker(
+                        point: park.location,
+                        color: Colors.green.withOpacity(0.16),
+                        borderColor: Colors.green[700]!,
+                        borderStrokeWidth: 1.5,
+                        radius: 24,
+                      ),
+                    )
+                    .toList(),
               ),
               // 仅显示中心点（米兰）
               MarkerLayer(
@@ -1544,6 +1642,39 @@ class _MapPageState extends State<MapPage> {
                             offset: const Offset(0, 2),
                           ),
                         ],
+                      ),
+                    ),
+                  ),
+                  ..._nearbyParks.map(
+                    (park) => Marker(
+                      point: park.location,
+                      width: 24,
+                      height: 24,
+                      child: Tooltip(
+                        message: park.name,
+                        child: Container(
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            shape: BoxShape.circle,
+                            border: Border.all(
+                              color: Colors.green[700]!,
+                              width: 2,
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withOpacity(0.15),
+                                blurRadius: 3,
+                                offset: const Offset(0, 1),
+                              ),
+                            ],
+                          ),
+                          padding: const EdgeInsets.all(4),
+                          child: Icon(
+                            Icons.park,
+                            color: Colors.green[700],
+                            size: 16,
+                          ),
+                        ),
                       ),
                     ),
                   ),
@@ -1586,6 +1717,27 @@ class _MapPageState extends State<MapPage> {
                   child: Text(
                     'Error: $_error',
                     style: TextStyle(color: Colors.red[900]),
+                  ),
+                ),
+              ),
+            ),
+
+          // 附近无公园提示
+          if (_error == null &&
+              !_loading &&
+              !_parksLoading &&
+              _nearbyParks.isEmpty)
+            Positioned(
+              top: 80,
+              left: 16,
+              right: 16,
+              child: Card(
+                color: Colors.green[50],
+                child: const Padding(
+                  padding: EdgeInsets.all(12),
+                  child: Text(
+                    '2 km 内暂无公园/绿地数据',
+                    style: TextStyle(color: Colors.black87),
                   ),
                 ),
               ),
@@ -1825,6 +1977,13 @@ class _MapLegend extends StatelessWidget {
         return (title: 'Unknown', items: []);
     }
   }
+}
+
+class ParkPoi {
+  final String name;
+  final LatLng location;
+
+  ParkPoi({required this.name, required this.location});
 }
 
 // Bottom Sheet 详情行
