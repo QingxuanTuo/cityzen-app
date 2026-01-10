@@ -61,8 +61,6 @@ class GeminiAIService {
           return await _callOpenAIAPI(userMessage, pm25, pm10, windSpeed, temperature, weatherCode, city);
         case AIProvider.claude:
           return await _callClaudeAPI(userMessage, pm25, pm10, windSpeed, temperature, weatherCode, city);
-        case AIProvider.ollama:
-          return await _callOllamaAPI(userMessage, pm25, pm10, windSpeed, temperature, weatherCode, city);
       }
     } catch (e) {
       debugPrint('AI Service Error: $e');
@@ -142,29 +140,6 @@ class GeminiAIService {
       return _formatAIResponse(content);
     } else {
       throw Exception('Claude API Error: ${response.statusCode}');
-    }
-  }
-
-  Future<String> _callOllamaAPI(String userMessage, double? pm25, double? pm10, 
-      double? windSpeed, double? temperature, int? weatherCode, String city) async {
-    
-    final systemPrompt = _buildSystemPrompt(userMessage, pm25, pm10, windSpeed, temperature, weatherCode, city);
-    
-    final response = await http.post(
-      Uri.parse(_configManager.getApiEndpoint()),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({
-        'model': _configManager.model,
-        'prompt': '$systemPrompt\n\nUser: $userMessage\nAssistant:',
-        'stream': false,
-      }),
-    );
-
-    if (response.statusCode == 200) {
-      final data = jsonDecode(response.body);
-      return _formatAIResponse(data['response']);
-    } else {
-      throw Exception('Ollama API Error: ${response.statusCode}');
     }
   }
 

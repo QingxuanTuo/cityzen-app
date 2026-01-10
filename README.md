@@ -21,7 +21,7 @@ An intelligent urban health companion app that helps city dwellers make informed
 - Interactive chat with AI coach
 
 ### ⚙️ Settings
-- Multiple AI provider support (Gemini, OpenAI, Claude, Ollama)
+- Multiple AI provider support (Gemini, OpenAI, Claude)
 - Customizable health thresholds and preferences
 - Location services and unit preferences
 

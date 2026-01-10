@@ -3278,7 +3278,7 @@ class _SettingsPageState extends State<SettingsPage> {
                       : '${_aiConfigManager.apiKey.substring(0, 8)}...',
                   onTap: () => _showAPIKeyDialog(),
                 ),
-                if (_aiConfigManager.currentProvider != AIProvider.ollama)
+                if (_aiConfigManager.currentProvider != AIProvider.gemini)
                   _SettingsTile(
                     icon: Icons.settings,
                     title: 'Model Settings',
@@ -3533,8 +3533,6 @@ class _SettingsPageState extends State<SettingsPage> {
         return Icons.psychology;
       case AIProvider.claude:
         return Icons.chat;
-      case AIProvider.ollama:
-        return Icons.computer;
     }
   }
 

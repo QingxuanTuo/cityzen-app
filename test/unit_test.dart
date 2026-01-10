@@ -64,14 +64,12 @@ void main() {
       expect(AIProvider.gemini.displayName, equals('Google Gemini'));
       expect(AIProvider.openai.displayName, equals('OpenAI GPT'));
       expect(AIProvider.claude.displayName, equals('Anthropic Claude'));
-      expect(AIProvider.ollama.displayName, equals('Ollama (Local)'));
     });
 
     test('AIProvider should have correct default models', () {
       expect(AIProvider.gemini.defaultModel, equals('models/gemini-3-flash-preview'));
       expect(AIProvider.openai.defaultModel, equals('gpt-4o-mini'));
       expect(AIProvider.claude.defaultModel, equals('claude-3-haiku-20240307'));
-      expect(AIProvider.ollama.defaultModel, equals('llama3.2'));
     });
 
     test('AIConfigManager should initialize with default values', () {
@@ -100,10 +98,6 @@ void main() {
       expect(configManager.validateApiKey('sk-ant-' + 'A' * 20, AIProvider.claude), isTrue);
       expect(configManager.validateApiKey('invalid', AIProvider.claude), isFalse);
       expect(configManager.validateApiKey('sk-ant-123', AIProvider.claude), isFalse); // Too short
-      
-      // Ollama allows any non-empty string (due to the isEmpty check at the beginning)
-      expect(configManager.validateApiKey('anything', AIProvider.ollama), isTrue);
-      // Note: Empty string returns false due to the initial isEmpty check
     });
   });
 

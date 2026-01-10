@@ -5,8 +5,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 enum AIProvider {
   gemini('Google Gemini', 'models/gemini-3-flash-preview'),
   openai('OpenAI GPT', 'gpt-4o-mini'),
-  claude('Anthropic Claude', 'claude-3-haiku-20240307'),
-  ollama('Ollama (Local)', 'llama3.2');
+  claude('Anthropic Claude', 'claude-3-haiku-20240307');
 
   const AIProvider(this.displayName, this.defaultModel);
   final String displayName;
@@ -110,8 +109,6 @@ class AIConfigManager extends ChangeNotifier {
         return 'https://api.openai.com/v1/chat/completions';
       case AIProvider.claude:
         return 'https://api.anthropic.com/v1/messages';
-      case AIProvider.ollama:
-        return 'http://localhost:11434/api/generate';
     }
   }
 
@@ -126,8 +123,6 @@ class AIConfigManager extends ChangeNotifier {
         return key.startsWith('sk-') && key.length > 20;
       case AIProvider.claude:
         return key.startsWith('sk-ant-') && key.length > 20;
-      case AIProvider.ollama:
-        return true; // Ollama通常不需要API Key
     }
   }
 
@@ -140,8 +135,6 @@ class AIConfigManager extends ChangeNotifier {
         return 'Get your API key from OpenAI Platform (platform.openai.com)';
       case AIProvider.claude:
         return 'Get your API key from Anthropic Console (console.anthropic.com)';
-      case AIProvider.ollama:
-        return 'Make sure Ollama is running locally on port 11434';
     }
   }
 }
