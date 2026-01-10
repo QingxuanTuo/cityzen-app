@@ -2074,7 +2074,7 @@ class _ActivityPageState extends State<ActivityPage> {
     _chatMessages.add(
       ChatMessage(
         text:
-            "Hi! I'm your AI assistant powered by Google Gemini. I can help you with environmental data analysis, city information, and general questions. What would you like to know?",
+            "您好！我是您的AI环境健康助手。我可以根据实时环境数据为您提供日常生活建议，帮助您减少环境暴露风险。有什么想了解的吗？",
         isUser: false,
         timestamp: DateTime.now(),
       ),
