@@ -1604,9 +1604,13 @@ out center 30;
             ),
             children: [
               TileLayer(
-                // 使用默认 OSM 底图
-                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                // 使用更美观的 CartoDB 地图样式
+                urlTemplate: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
+                subdomains: const ['a', 'b', 'c', 'd'],
                 userAgentPackageName: 'com.example.cityzen',
+                additionalOptions: const {
+                  'attribution': '© CartoDB © OpenStreetMap contributors',
+                },
               ),
               CircleLayer(
                 circles: _nearbyParks
@@ -1626,22 +1630,32 @@ out center 30;
                 markers: [
                   Marker(
                     point: _center,
-                    width: 24,
-                    height: 24,
+                    width: 40,
+                    height: 40,
                     child: Container(
-                      width: 18,
-                      height: 18,
                       decoration: BoxDecoration(
-                        color: _centerColor(),
+                        gradient: LinearGradient(
+                          colors: [
+                            _centerColor(),
+                            _centerColor().withOpacity(0.8),
+                          ],
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                        ),
                         shape: BoxShape.circle,
                         border: Border.all(color: Colors.white, width: 3),
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.black.withOpacity(0.25),
-                            blurRadius: 4,
-                            offset: const Offset(0, 2),
+                            color: Colors.black.withOpacity(0.3),
+                            blurRadius: 8,
+                            offset: const Offset(0, 4),
                           ),
                         ],
+                      ),
+                      child: Icon(
+                        Icons.location_on,
+                        color: Colors.white,
+                        size: 20,
                       ),
                     ),
                   ),
