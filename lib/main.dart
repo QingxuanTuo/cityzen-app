@@ -19,7 +19,7 @@ import 'package:cityzen/services/background_data_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  
+
   // 初始化Firebase和认证服务
   try {
     await FirebaseService.instance.initialize();
@@ -28,7 +28,7 @@ void main() async {
   } catch (e) {
     debugPrint('CITYZEN INITIALIZATION ERROR: $e');
   }
-  
+
   debugPrint('CITYZEN MAIN LOADED');
   runApp(const CityZenApp());
 }
@@ -61,7 +61,7 @@ class AuthWrapper extends StatelessWidget {
       listenable: AuthServiceDemo.instance,
       builder: (context, child) {
         final authService = AuthServiceDemo.instance;
-        
+
         if (authService.isLoading) {
           return const Scaffold(
             body: Center(
@@ -76,7 +76,7 @@ class AuthWrapper extends StatelessWidget {
             ),
           );
         }
-        
+
         if (authService.isAuthenticated) {
           return const MainShell();
         } else {
@@ -117,9 +117,7 @@ class _MainShellState extends State<MainShell> {
   Widget build(BuildContext context) {
     final pages = [
       ResponsiveLayout(
-        mobileLayout: HomePage(
-          onGoActivity: () => setState(() => _index = 2),
-        ),
+        mobileLayout: HomePage(onGoActivity: () => setState(() => _index = 2)),
         tabletLayout: const TabletHomePage(),
         desktopLayout: const TabletHomePage(),
       ),
@@ -177,6 +175,8 @@ class _HomePageState extends State<HomePage> {
   }
 
   Future<void> _fetchWeather() async {
+    debugPrint('[_fetchWeather] CALLED at ${DateTime.now()}'); // ✅ 加在这里
+
     setState(() {
       _loading = true;
       _error = null;
@@ -218,24 +218,71 @@ class _HomePageState extends State<HomePage> {
         return null;
       }
 
-      final pm25 = latestNonNull(aqHourly?['pm2_5'] as List?);
-      final pm10 = latestNonNull(aqHourly?['pm10'] as List?);
-      final pm25List = (aqHourly?['pm2_5'] as List?) ?? [];
-      final trend = pm25List
-          .where((e) => e is num)
-          .map((e) => (e as num).toDouble())
-          .toList();
+      final times = (aqHourly?['time'] as List?) ?? [];
+      final pm25Raw = (aqHourly?['pm2_5'] as List?) ?? [];
+      final pm10Raw = (aqHourly?['pm10'] as List?) ?? [];
 
-      // 你图表是 12 个点：00,02,...22（每2小时一个点）
-      // 所以从 hourly（24个点）里每隔2个取1个，最多取12个
+      // 1) 把 time + value 对齐成列表（允许中间有 null）
+      DateTime? parseTime(dynamic t) {
+        if (t is String) {
+          // Open-Meteo 返回类似 "2026-01-11T16:00"
+          return DateTime.tryParse(t);
+        }
+        return null;
+      }
+
+      // 找到“最接近现在”的小时索引
+      final now = DateTime.now();
+      int nearestHourIndex = 0;
+      Duration best = const Duration(days: 9999);
+
+      for (int i = 0; i < times.length; i++) {
+        final dt = parseTime(times[i]);
+        if (dt == null) continue;
+        final d = (dt.difference(now)).abs();
+        if (d < best) {
+          best = d;
+          nearestHourIndex = i;
+        }
+      }
+
+      // 2) 当前值：用 nearestHourIndex，而不是 last
+      double? pickNumAt(List<dynamic> list, int idx) {
+        if (idx < 0 || idx >= list.length) return null;
+        final v = list[idx];
+        return v is num ? v.toDouble() : null;
+      }
+
+      final pm25 = pickNumAt(pm25Raw, nearestHourIndex);
+      final pm10 = pickNumAt(pm10Raw, nearestHourIndex);
+
+      // 3) 趋势：从“当前小时”开始，每隔2小时取1个，取12个点
       final sampled = <double>[];
-      for (int i = 0; i < trend.length && sampled.length < 12; i += 2) {
-        sampled.add(trend[i]);
+      for (
+        int i = nearestHourIndex;
+        i < pm25Raw.length && sampled.length < 12;
+        i += 2
+      ) {
+        final v = pm25Raw[i];
+        if (v is num) sampled.add(v.toDouble());
+      }
+
+      // 如果后面点不够（比如接口只给到未来较短范围），就从前面补齐
+      if (sampled.length < 12) {
+        for (int i = 0; i < pm25Raw.length && sampled.length < 12; i += 2) {
+          final v = pm25Raw[i];
+          if (v is num) sampled.add(v.toDouble());
+        }
       }
 
       setState(() {
         _pm25Trend = sampled;
       });
+
+      // 观察：看看 index 和时间是否对
+      debugPrint(
+        'AQI now=$now nearestIndex=$nearestHourIndex time=${times.isNotEmpty ? times[nearestHourIndex] : 'N/A'} pm25=$pm25 pm10=$pm10',
+      );
 
       debugPrint('AQ pm2_5=$pm25 pm10=$pm10');
 
@@ -490,14 +537,19 @@ class _HomePageState extends State<HomePage> {
       ),
 
       body: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(16, 10, 16, 28),
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
         child: _loading
             ? const SizedBox(
                 height: 300,
                 child: Center(child: CircularProgressIndicator()),
               )
             : _error != null
-            ? Center(child: Text('Loading failed:\n$_error', textAlign: TextAlign.center))
+            ? Center(
+                child: Text(
+                  'Loading failed:\n$_error',
+                  textAlign: TextAlign.center,
+                ),
+              )
             : r == null
             ? const Center(child: Text('No data available'))
             : Column(
@@ -655,7 +707,7 @@ class _HomePageState extends State<HomePage> {
                       ),
                     ),
                   ),
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 8),
                   // ✅ EAQI 总览卡片（新加）
                   Builder(
                     builder: (context) {
@@ -670,7 +722,7 @@ class _HomePageState extends State<HomePage> {
                     },
                   ),
 
-                  const SizedBox(height: 8),
+                  const SizedBox(height: 4),
 
                   /// 🤖 AI Advice 卡片（可点击跳转到 AI Chat）
                   Card(
@@ -687,10 +739,7 @@ class _HomePageState extends State<HomePage> {
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            const Icon(
-                              Icons.chat,
-                              color: Colors.white,
-                            ),
+                            const Icon(Icons.chat, color: Colors.white),
                             const SizedBox(width: 10),
                             const Text(
                               'AI Advice >>',
@@ -708,7 +757,7 @@ class _HomePageState extends State<HomePage> {
                     ),
                   ),
 
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 90),
                 ],
               ),
       ),
@@ -1183,23 +1232,13 @@ class _EAQICard extends StatelessWidget {
             const SizedBox(height: 16),
 
             // 图表标题和图例
-            Row(
-              children: [
-                const Text(
-                  '24h Trend',
-                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
-                ),
-                const Spacer(),
-                _buildMiniLegend(),
-              ],
-            ),
             const SizedBox(height: 8),
 
             // 小趋势图（示例数据：12个点=一天趋势）
             AirQualityTrend(values: trendValues, color: eaqiColor),
-            
+
             const SizedBox(height: 8),
-            
+
             // 简化的空气质量等级说明
             _buildSimpleAQILegend(),
           ],
@@ -1266,10 +1305,7 @@ class _EAQICard extends StatelessWidget {
           Container(
             width: 6,
             height: 6,
-            decoration: BoxDecoration(
-              color: color,
-              shape: BoxShape.circle,
-            ),
+            decoration: BoxDecoration(color: color, shape: BoxShape.circle),
           ),
           const SizedBox(width: 3),
           Flexible(
@@ -1433,11 +1469,7 @@ class _ActivityPageState extends State<ActivityPage> {
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(
-                Icons.smart_toy_outlined,
-                size: 64,
-                color: Colors.grey[400],
-              ),
+              Icon(Icons.smart_toy_outlined, size: 64, color: Colors.grey[400]),
               const SizedBox(height: 16),
               Text(
                 'AI Assistant Not Configured',
@@ -1470,7 +1502,10 @@ class _ActivityPageState extends State<ActivityPage> {
                           SizedBox(height: 12),
                           Text(
                             'Get your free API key from: https://aistudio.google.com/api-keys',
-                            style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic),
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontStyle: FontStyle.italic,
+                            ),
                           ),
                         ],
                       ),
@@ -1493,9 +1528,9 @@ class _ActivityPageState extends State<ActivityPage> {
               const SizedBox(height: 16),
               Text(
                 'Get your free API key from: https://aistudio.google.com/api-keys',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: Colors.grey[600],
-                ),
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: Colors.grey[600]),
                 textAlign: TextAlign.center,
               ),
             ],
@@ -1710,7 +1745,8 @@ class _SettingsPageState extends State<SettingsPage> {
   bool _locationEnabled = true;
   String _temperatureUnit = 'Celsius';
   final AIConfigManager _aiConfigManager = AIConfigManager();
-  final BackgroundDataService _backgroundService = BackgroundDataService.instance;
+  final BackgroundDataService _backgroundService =
+      BackgroundDataService.instance;
   bool _backgroundDataEnabled = false;
 
   @override
@@ -1748,10 +1784,7 @@ class _SettingsPageState extends State<SettingsPage> {
             const SizedBox(height: 12),
             Text(
               'Get your API key from: https://aistudio.google.com/api-keys',
-              style: TextStyle(
-                fontSize: 12,
-                color: Colors.grey[600],
-              ),
+              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
             ),
           ],
         ),
@@ -1931,7 +1964,9 @@ class _SettingsPageState extends State<SettingsPage> {
                 _SettingsTile(
                   icon: Icons.sync,
                   title: 'Background Data Sync',
-                  subtitle: _backgroundDataEnabled ? 'Active (Multi-threading)' : 'Disabled',
+                  subtitle: _backgroundDataEnabled
+                      ? 'Active (Multi-threading)'
+                      : 'Disabled',
                   trailing: Switch(
                     value: _backgroundDataEnabled,
                     onChanged: (value) async {
@@ -1939,7 +1974,9 @@ class _SettingsPageState extends State<SettingsPage> {
                         await _backgroundService.startBackgroundFetching();
                         ScaffoldMessenger.of(context).showSnackBar(
                           const SnackBar(
-                            content: Text('Background data sync enabled (using Isolates)'),
+                            content: Text(
+                              'Background data sync enabled (using Isolates)',
+                            ),
                             backgroundColor: Colors.green,
                           ),
                         );
@@ -1973,8 +2010,8 @@ class _SettingsPageState extends State<SettingsPage> {
                 _SettingsTile(
                   icon: Icons.smart_toy,
                   title: 'AI Configuration',
-                  subtitle: AIConfigManager().isConfigured 
-                      ? 'Gemini AI configured' 
+                  subtitle: AIConfigManager().isConfigured
+                      ? 'Gemini AI configured'
                       : 'Configure Gemini API key',
                   onTap: () => _showAIConfigDialog(context),
                 ),
@@ -2005,10 +2042,9 @@ class _SettingsPageState extends State<SettingsPage> {
                   onTap: () async {
                     await AuthServiceDemo.instance.signOut();
                     if (mounted) {
-                      Navigator.of(context).pushNamedAndRemoveUntil(
-                        '/',
-                        (route) => false,
-                      );
+                      Navigator.of(
+                        context,
+                      ).pushNamedAndRemoveUntil('/', (route) => false);
                     }
                   },
                 ),
