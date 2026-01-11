@@ -22,12 +22,12 @@ void main() {
       expect(app.title, equals('CityZen'));
     });
 
-    testWidgets('App should have MainShell as home', (WidgetTester tester) async {
+    testWidgets('App should have AuthWrapper as home', (WidgetTester tester) async {
       await tester.pumpWidget(const CityZenApp());
       await tester.pump();
 
-      // Verify MainShell is present
-      expect(find.byType(MainShell), findsOneWidget);
+      // Verify AuthWrapper is present (which handles authentication flow)
+      expect(find.byType(AuthWrapper), findsOneWidget);
     });
   });
 
@@ -38,6 +38,15 @@ void main() {
       final MaterialApp app = tester.widget(find.byType(MaterialApp));
       expect(app.debugShowCheckedModeBanner, isFalse);
       expect(app.title, equals('CityZen'));
+    });
+
+    testWidgets('Should have proper route configuration', (WidgetTester tester) async {
+      await tester.pumpWidget(const CityZenApp());
+      
+      final MaterialApp app = tester.widget(find.byType(MaterialApp));
+      expect(app.routes, isNotNull);
+      expect(app.routes!.containsKey('/login'), isTrue);
+      expect(app.routes!.containsKey('/home'), isTrue);
     });
   });
 }

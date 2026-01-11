@@ -1,16 +1,17 @@
 import 'package:flutter/material.dart';
+import 'package:cityzen/responsive/breakpoints.dart';
 
 /// 响应式布局管理器
 /// 根据屏幕尺寸自动切换布局模式
 class ResponsiveLayout extends StatelessWidget {
   final Widget mobileLayout;
-  final Widget tabletLayout;
+  final Widget? tabletLayout;
   final Widget? desktopLayout;
 
   const ResponsiveLayout({
     super.key,
     required this.mobileLayout,
-    required this.tabletLayout,
+    this.tabletLayout,
     this.desktopLayout,
   });
 
@@ -18,15 +19,16 @@ class ResponsiveLayout extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        if (constraints.maxWidth < 600) {
-          // 手机布局 (< 600dp)
-          return mobileLayout;
-        } else if (constraints.maxWidth < 1200) {
-          // 平板布局 (600dp - 1200dp)
-          return tabletLayout;
-        } else {
-          // 桌面布局 (> 1200dp)
-          return desktopLayout ?? tabletLayout;
+        final width = constraints.maxWidth;
+        final deviceType = ResponsiveHelper.getDeviceType(width);
+
+        switch (deviceType) {
+          case DeviceType.mobile:
+            return mobileLayout;
+          case DeviceType.tablet:
+            return tabletLayout ?? mobileLayout;
+          case DeviceType.desktop:
+            return desktopLayout ?? tabletLayout ?? mobileLayout;
         }
       },
     );
@@ -36,20 +38,101 @@ class ResponsiveLayout extends StatelessWidget {
 /// 屏幕尺寸工具类
 class ScreenSize {
   static bool isMobile(BuildContext context) {
-    return MediaQuery.of(context).size.width < 600;
+    return MediaQuery.of(context).size.width < Breakpoints.mobile;
   }
 
   static bool isTablet(BuildContext context) {
     final width = MediaQuery.of(context).size.width;
-    return width >= 600 && width < 1200;
+    return width >= Breakpoints.mobile && width < Breakpoints.desktop;
   }
 
   static bool isDesktop(BuildContext context) {
-    return MediaQuery.of(context).size.width >= 1200;
+    return MediaQuery.of(context).size.width >= Breakpoints.desktop;
   }
 
   static bool isLandscape(BuildContext context) {
     return MediaQuery.of(context).orientation == Orientation.landscape;
+  }
+
+  static bool isCompactHeight(BuildContext context) {
+    return MediaQuery.of(context).size.height < Breakpoints.compactHeight;
+  }
+}
+
+/// Responsive container that adapts its layout based on screen size
+class ResponsiveContainer extends StatelessWidget {
+  final Widget child;
+  final EdgeInsetsGeometry? padding;
+  final double? maxWidth;
+  final bool centerContent;
+
+  const ResponsiveContainer({
+    super.key,
+    required this.child,
+    this.padding,
+    this.maxWidth,
+    this.centerContent = true,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth;
+        final responsivePadding = padding ?? EdgeInsets.all(ResponsiveHelper.getResponsivePadding(width));
+        final contentMaxWidth = maxWidth ?? Breakpoints.contentMaxWidth;
+
+        Widget content = Container(
+          padding: responsivePadding,
+          constraints: BoxConstraints(maxWidth: contentMaxWidth),
+          child: child,
+        );
+
+        if (centerContent && width > contentMaxWidth) {
+          content = Center(child: content);
+        }
+
+        return content;
+      },
+    );
+  }
+}
+
+/// Responsive grid that adapts column count based on screen size
+class ResponsiveGrid extends StatelessWidget {
+  final List<Widget> children;
+  final double spacing;
+  final double runSpacing;
+  final int? forceColumns;
+
+  const ResponsiveGrid({
+    super.key,
+    required this.children,
+    this.spacing = 16.0,
+    this.runSpacing = 16.0,
+    this.forceColumns,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth;
+        final columns = forceColumns ?? ResponsiveHelper.getGridColumns(width);
+        
+        return Wrap(
+          spacing: spacing,
+          runSpacing: runSpacing,
+          children: children.map((child) {
+            final itemWidth = (width - (spacing * (columns - 1))) / columns;
+            return SizedBox(
+              width: itemWidth,
+              child: child,
+            );
+          }).toList(),
+        );
+      },
+    );
   }
 }
 

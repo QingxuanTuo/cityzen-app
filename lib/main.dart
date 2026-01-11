@@ -2,14 +2,10 @@ import 'package:flutter/material.dart';
 import 'dart:convert';
 import 'dart:async';
 import 'package:http/http.dart' as http;
-import 'package:flutter_map/flutter_map.dart';
-import 'package:latlong2/latlong.dart';
 import 'package:cityzen/theme/app_theme.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cityzen/ai_service.dart';
 import 'package:cityzen/environment_data.dart';
 import 'package:cityzen/ai_config.dart';
-import 'package:geolocator/geolocator.dart';
 import 'package:fl_chart/fl_chart.dart';
 import 'package:cityzen/responsive/responsive_layout.dart';
 import 'package:cityzen/pages/environmental_data_master_detail.dart';
@@ -17,8 +13,9 @@ import 'package:cityzen/services/firebase_service.dart';
 import 'package:cityzen/services/auth_service_demo.dart';
 import 'package:cityzen/services/user_data_service.dart';
 import 'package:cityzen/pages/auth/login_page.dart';
-import 'package:cityzen/services/enhanced_air_quality_service.dart';
-import 'package:cityzen/widgets/air_quality_heatmap.dart';
+import 'package:cityzen/pages/simplified_map_page.dart';
+import 'package:cityzen/pages/tablet_home_page.dart';
+import 'package:cityzen/services/background_data_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -119,11 +116,15 @@ class _MainShellState extends State<MainShell> {
   @override
   Widget build(BuildContext context) {
     final pages = [
-      HomePage(
-        onGoActivity: () => setState(() => _index = 2),
-      ), // ✅ 跳到 Activity tab
       ResponsiveLayout(
-        mobileLayout: const MapPage(),
+        mobileLayout: HomePage(
+          onGoActivity: () => setState(() => _index = 2),
+        ),
+        tabletLayout: const TabletHomePage(),
+        desktopLayout: const TabletHomePage(),
+      ),
+      ResponsiveLayout(
+        mobileLayout: const SimplifiedMapPage(),
         tabletLayout: const EnvironmentalDataMasterDetail(),
       ),
       const ActivityPage(),
@@ -440,7 +441,7 @@ class _HomePageState extends State<HomePage> {
           ),
         ],
 
-        // ✅ AppBar 下方加“定位 pill”，像你参考图那样
+        // ✅ AppBar 下方加"定位 pill"，像你参考图那样
         bottom: PreferredSize(
           preferredSize: const Size.fromHeight(56),
           child: Padding(
@@ -1179,1197 +1180,105 @@ class _EAQICard extends StatelessWidget {
                 color: Color(0xFF2E2E2E),
               ),
             ),
-            const SizedBox(height: 20),
+            const SizedBox(height: 16),
+
+            // 图表标题和图例
+            Row(
+              children: [
+                const Text(
+                  '24h Trend',
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+                ),
+                const Spacer(),
+                _buildMiniLegend(),
+              ],
+            ),
+            const SizedBox(height: 8),
 
             // 小趋势图（示例数据：12个点=一天趋势）
             AirQualityTrend(values: trendValues, color: eaqiColor),
+            
+            const SizedBox(height: 8),
+            
+            // 简化的空气质量等级说明
+            _buildSimpleAQILegend(),
           ],
         ),
       ),
     );
   }
-}
 
-class MapPage extends StatefulWidget {
-  const MapPage({super.key});
-
-  @override
-  State<MapPage> createState() => _MapPageState();
-}
-
-class _MapPageState extends State<MapPage> {
-  final _mapController = MapController();
-  String _selectedLayer = 'AQI';
-
-  final _milan = LatLng(45.4809167, 9.2251111); // 45°28'51.3"N 9°13'30.4"E
-  // 当前“中心数据/标记”的位置，初始为米兰
-  late LatLng _center = _milan;
-  GridPoint? _centerData;
-  List<ParkPoi> _nearbyParks = [];
-  bool _loading = false;
-  bool _parksLoading = false;
-  String? _error;
-  double _currentZoom = 15.0;
-  LatLng _currentCenter = const LatLng(45.4809167, 9.2251111); // 45°28'51.3"N 9°13'30.4"E
-
-  // 热力图相关
-  final EnhancedAirQualityService _airQualityService = EnhancedAirQualityService();
-  AirQualityGrid? _airQualityGrid;
-  List<AirQualityStation> _stations = [];
-  bool _showHeatmap = true;
-  bool _showStations = true;
-  String _selectedPollutant = 'PM2.5';
-
-  @override
-  void initState() {
-    super.initState();
-    _fetchCenterData();
-    _loadAirQualityData(); // 加载热力图数据
-  }
-
-  Future<void> _fetchCenterData() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
-
-    try {
-      final data = await _fetchPointData(_center);
-      setState(() {
-        _centerData = data;
-        _loading = false;
-      });
-      // 公园数据异步拉取，不阻塞主加载
-      _loadParks(_center);
-    } catch (e) {
-      setState(() {
-        _error = e.toString();
-        _loading = false;
-      });
-    }
-  }
-
-  // Load heatmap data with more stations
-  Future<void> _loadAirQualityData() async {
-    try {
-      // Get nearby stations with larger radius to cover all Milan area
-      final stations = await _airQualityService.getNearbyStations(
-        _center, 
-        50.0, // Increased to 50km radius to cover entire Milan metropolitan area
-      );
-      
-      // Generate grid data for heatmap with larger bounds
-      final bounds = LatLngBounds(
-        LatLng(_center.latitude - 0.3, _center.longitude - 0.3), // Expanded bounds
-        LatLng(_center.latitude + 0.3, _center.longitude + 0.3),
-      );
-      
-      final grid = await _airQualityService.getAirQualityGrid(
-        bounds, 
-        1.5, // Reduced to 1.5km grid resolution for better coverage
-      );
-      
-      if (mounted) {
-        setState(() {
-          _stations = stations;
-          _airQualityGrid = grid;
-        });
-      }
-      
-      debugPrint('Loaded ${stations.length} air quality stations');
-    } catch (e) {
-      debugPrint('Error loading air quality data: $e');
-    }
-  }
-
-  Future<void> _loadParks(LatLng center) async {
-    setState(() => _parksLoading = true);
-    try {
-      final parks = await _fetchParksAround(center);
-      if (!mounted) return;
-      setState(() {
-        _nearbyParks = parks;
-        _parksLoading = false;
-      });
-    } catch (_) {
-      if (!mounted) return;
-      setState(() => _parksLoading = false);
-    }
-  }
-
-  // 中心点着色：依据当前图层与中心数据
-  Color _centerColor() {
-    final d = _centerData;
-    if (d == null) return Colors.grey;
-
-    switch (_selectedLayer) {
-      case 'AQI':
-        final aqi = d.aqi;
-        if (aqi == null) return Colors.grey;
-        if (aqi <= 50) return Colors.green;
-        if (aqi <= 100) return Colors.yellow;
-        if (aqi <= 150) return Colors.orange;
-        return Colors.red;
-
-      case 'PM2.5':
-        final pm25 = d.pm25;
-        if (pm25 == null) return Colors.grey;
-        if (pm25 < 10) return Colors.green;
-        if (pm25 < 25) return Colors.amber;
-        return Colors.red;
-
-      case 'O₃':
-        final ozone = d.ozone;
-        if (ozone == null) return Colors.grey;
-        if (ozone <= 60) return Colors.green;
-        if (ozone <= 120) return Colors.yellow;
-        if (ozone <= 180) return Colors.orange;
-        return Colors.red;
-
-      case 'Rain':
-        final precip = d.precipitation;
-        if (precip == null) return Colors.grey;
-        if (precip == 0) return Colors.grey[300]!;
-        if (precip < 5) return Colors.lightBlue[200]!;
-        if (precip < 20) return Colors.blue;
-        return Colors.indigo;
-
-      default:
-        return Colors.grey;
-    }
-  }
-
-  Future<GridPoint> _fetchPointData(LatLng point) async {
-    try {
-      // 天气数据
-      final weatherUri = Uri.parse(
-        'https://api.open-meteo.com/v1/forecast'
-        '?latitude=${point.latitude}&longitude=${point.longitude}'
-        '&current=temperature_2m,precipitation,weathercode'
-        '&timezone=auto',
-      );
-
-      // 空气质量数据
-      final aqUri = Uri.parse(
-        'https://air-quality-api.open-meteo.com/v1/air-quality'
-        '?latitude=${point.latitude}&longitude=${point.longitude}'
-        '&current=pm2_5,pm10,ozone'
-        '&timezone=auto',
-      );
-
-      final weatherResp = await http
-          .get(weatherUri)
-          .timeout(const Duration(seconds: 10));
-      final aqResp = await http.get(aqUri).timeout(const Duration(seconds: 10));
-
-      if (weatherResp.statusCode != 200 || aqResp.statusCode != 200) {
-        throw Exception('API request failed');
-      }
-
-      final weatherJson = jsonDecode(weatherResp.body) as Map<String, dynamic>;
-      final aqJson = jsonDecode(aqResp.body) as Map<String, dynamic>;
-
-      final weatherCurrent = weatherJson['current'] as Map<String, dynamic>?;
-      final aqCurrent = aqJson['current'] as Map<String, dynamic>?;
-
-      final temp = (weatherCurrent?['temperature_2m'] as num?)?.toDouble();
-      final precip = (weatherCurrent?['precipitation'] as num?)?.toDouble();
-      final weatherCode = weatherCurrent?['weathercode'] as int?;
-
-      final pm25 = (aqCurrent?['pm2_5'] as num?)?.toDouble();
-      final pm10 = (aqCurrent?['pm10'] as num?)?.toDouble();
-      final ozone = (aqCurrent?['ozone'] as num?)?.toDouble();
-
-      // 简化版AQI计算（基于PM2.5）
-      final aqi = _calculateAQI(pm25);
-
-      return GridPoint(
-        location: point,
-        temperature: temp,
-        precipitation: precip,
-        pm25: pm25,
-        pm10: pm10,
-        ozone: ozone,
-        aqi: aqi,
-        weatherCode: weatherCode,
-      );
-    } catch (e) {
-      // 失败时返回空数据点
-      return GridPoint(location: point);
-    }
-  }
-
-  Future<List<ParkPoi>> _fetchParksAround(LatLng center) async {
-    const endpoints = [
-      'https://overpass-api.de/api/interpreter',
-      'https://lz4.overpass-api.de/api/interpreter',
-      'https://overpass.kumi.systems/api/interpreter',
-    ];
-
-    final query =
-        '''
-[out:json][timeout:12];
-(
-  node["leisure"="park"](around:2000,${center.latitude},${center.longitude});
-  way["leisure"="park"](around:2000,${center.latitude},${center.longitude});
-  relation["leisure"="park"](around:2000,${center.latitude},${center.longitude});
-);
-out center 30;
-''';
-
-    for (final endpoint in endpoints) {
-      try {
-        final uri = Uri.parse(endpoint);
-        final resp = await http
-            .post(uri, body: {'data': query})
-            .timeout(const Duration(seconds: 12));
-        if (resp.statusCode != 200) continue;
-
-        final parks = _parseOverpassParks(resp.body);
-        if (parks.isNotEmpty) return parks;
-      } catch (_) {
-        // 忽略单个端点失败，尝试下一个
-        continue;
-      }
-    }
-
-    return [];
-  }
-
-  List<ParkPoi> _parseOverpassParks(String body) {
-    try {
-      final json = jsonDecode(body) as Map<String, dynamic>;
-      final elements = (json['elements'] as List?) ?? [];
-
-      final seen = <String>{};
-      final parks = <ParkPoi>[];
-
-      for (final e in elements) {
-        final type = e['type'] as String?;
-        double? lat;
-        double? lon;
-        if (type == 'node') {
-          lat = (e['lat'] as num?)?.toDouble();
-          lon = (e['lon'] as num?)?.toDouble();
-        } else {
-          final centerJson = e['center'] as Map<String, dynamic>?;
-          lat = (centerJson?['lat'] as num?)?.toDouble();
-          lon = (centerJson?['lon'] as num?)?.toDouble();
-        }
-        if (lat == null || lon == null) continue;
-
-        final key = '${lat.toStringAsFixed(5)},${lon.toStringAsFixed(5)}';
-        if (!seen.add(key)) continue;
-
-        final tags = e['tags'] as Map<String, dynamic>?;
-        final name = tags?['name'] as String?;
-        parks.add(
-          ParkPoi(
-            name: name?.isNotEmpty == true ? name! : 'Green area',
-            location: LatLng(lat, lon),
-          ),
-        );
-      }
-
-      return parks;
-    } catch (_) {
-      return [];
-    }
-  }
-
-  int? _calculateAQI(double? pm25) {
-    if (pm25 == null) return null;
-    // 简化版 AQI 计算（美国EPA标准）
-    if (pm25 <= 12) return (pm25 / 12 * 50).round();
-    if (pm25 <= 35.4) return (50 + (pm25 - 12) / 23.4 * 50).round();
-    if (pm25 <= 55.4) return (100 + (pm25 - 35.4) / 20 * 50).round();
-    if (pm25 <= 150.4) return (150 + (pm25 - 55.4) / 95 * 50).round();
-    return 200;
-  }
-
-  void _recenterMap() {
-    _mapController.move(_center, 13);
-  }
-
-  void _recenterToDefault() {
-    if (!mounted) return;
-    setState(() {
-      _center = _milan;
-      _currentCenter = _milan;
-    });
-    _mapController.move(_milan, 13);
-    _fetchCenterData();
-  }
-
-  Future<void> _recenterToMyLocation() async {
-    try {
-      // 显示加载指示器
-      if (mounted) {
-        setState(() => _loading = true);
-      }
-
-      // 检查地理定位服务是否可用
-      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
-      if (!serviceEnabled) {
-        _showLocationError('Location services are disabled. Please enable location services in your system settings.');
-        return;
-      }
-
-      // 检查权限
-      LocationPermission permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
-      }
-
-      if (permission == LocationPermission.denied) {
-        _showLocationError('Location permission denied. Please click the location icon in your browser\'s address bar and allow location access.');
-        return;
-      }
-
-      if (permission == LocationPermission.deniedForever) {
-        _showLocationError('Location permission permanently denied. Please go to browser settings and enable location for this site.');
-        return;
-      }
-
-      // 尝试获取当前位置，使用更宽松的设置
-      final position = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.medium, // 降低精度要求
-        timeLimit: const Duration(seconds: 10), // 减少超时时间
-      ).timeout(
-        const Duration(seconds: 15),
-        onTimeout: () {
-          throw Exception('Location request timed out. This may be due to browser security restrictions.');
-        },
-      );
-      
-      final userCenter = LatLng(position.latitude, position.longitude);
-      
-      if (!mounted) return;
-      
-      setState(() {
-        _center = userCenter;
-        _currentCenter = userCenter;
-        _loading = false;
-      });
-      
-      _mapController.move(userCenter, _currentZoom);
-      await _fetchCenterData();
-      await _loadAirQualityData(); // 重新加载空气质量数据
-      
-      // 显示成功消息
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Location updated: ${position.latitude.toStringAsFixed(4)}, ${position.longitude.toStringAsFixed(4)}'),
-            backgroundColor: Colors.green,
-            duration: const Duration(seconds: 3),
-          ),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() => _loading = false);
-      }
-      
-      String errorMessage = 'Failed to get location: ';
-      if (e is LocationServiceDisabledException) {
-        errorMessage += 'Location services are disabled in your system';
-      } else if (e is PermissionDeniedException) {
-        errorMessage += 'Location permission denied by browser';
-      } else if (e.toString().contains('timed out')) {
-        errorMessage += 'Request timed out. Try enabling location in browser settings';
-      } else if (e.toString().contains('Position update is unavailable')) {
-        errorMessage += 'Browser location unavailable. Try refreshing the page or check browser settings';
-      } else {
-        errorMessage += e.toString();
-      }
-      
-      _showLocationError(errorMessage);
-    }
-  }
-
-  void _showLocationError(String message) {
-    if (!mounted) return;
-    
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(message),
-            const SizedBox(height: 4),
-            const Text(
-              'Tips: Check browser location settings or try refreshing the page',
-              style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic),
-            ),
-          ],
-        ),
-        backgroundColor: Colors.red,
-        duration: const Duration(seconds: 6),
-        action: SnackBarAction(
-          label: 'Use Milan',
-          textColor: Colors.white,
-          onPressed: _recenterToDefault,
-        ),
+  // 迷你图例
+  Widget _buildMiniLegend() {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.grey[100],
+        borderRadius: BorderRadius.circular(6),
       ),
-    );
-  }
-
-  void _showManualLocationDialog() {
-    final latController = TextEditingController();
-    final lonController = TextEditingController();
-    
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Enter Location'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: latController,
-              decoration: const InputDecoration(
-                labelText: 'Latitude',
-                hintText: 'e.g., 45.4809167',
-              ),
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: lonController,
-              decoration: const InputDecoration(
-                labelText: 'Longitude',
-                hintText: 'e.g., 9.2251111',
-              ),
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-            ),
-            const SizedBox(height: 16),
-            const Text(
-              'Examples:\n• Milan: 45.4809, 9.2251\n• Rome: 41.9028, 12.4964\n• Florence: 43.7696, 11.2558',
-              style: TextStyle(fontSize: 12, color: Colors.grey),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () {
-              final lat = double.tryParse(latController.text);
-              final lon = double.tryParse(lonController.text);
-              
-              if (lat != null && lon != null && 
-                  lat >= -90 && lat <= 90 && 
-                  lon >= -180 && lon <= 180) {
-                Navigator.of(context).pop();
-                _setManualLocation(lat, lon);
-              } else {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Please enter valid coordinates'),
-                    backgroundColor: Colors.red,
-                  ),
-                );
-              }
-            },
-            child: const Text('Set Location'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _setManualLocation(double lat, double lon) async {
-    final userCenter = LatLng(lat, lon);
-    
-    setState(() {
-      _center = userCenter;
-      _currentCenter = userCenter;
-    });
-    
-    _mapController.move(userCenter, _currentZoom);
-    await _fetchCenterData();
-    await _loadAirQualityData();
-    
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Location set to: ${lat.toStringAsFixed(4)}, ${lon.toStringAsFixed(4)}'),
-          backgroundColor: Colors.green,
-          duration: const Duration(seconds: 3),
-        ),
-      );
-    }
-  }
-
-  void _onMapTap(TapPosition tapPosition, LatLng point) async {
-    // 仅在点击接近中心点时显示详情
-    const thresholdDeg = 0.0004; // ~40-50米的经纬度粗略阈值
-    final dist2 = _distanceSquared(point, _center);
-    if (dist2 > thresholdDeg * thresholdDeg) {
-      return; // 点击其他区域不显示
-    }
-
-    if (!mounted) return;
-    showModalBottomSheet(
-      context: context,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) => _buildBottomSheet(point, _centerData),
-    );
-  }
-
-  double _distanceSquared(LatLng a, LatLng b) {
-    final dx = a.latitude - b.latitude;
-    final dy = a.longitude - b.longitude;
-    return dx * dx + dy * dy;
-  }
-
-  Widget _buildBottomSheet(LatLng point, GridPoint? data) {
-    return Padding(
-      padding: const EdgeInsets.all(20),
-      child: Column(
+      child: Row(
         mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            'Location Details',
-            style: Theme.of(context).textTheme.titleLarge,
+          Container(
+            width: 12,
+            height: 2,
+            decoration: BoxDecoration(
+              color: eaqiColor,
+              borderRadius: BorderRadius.circular(1),
+            ),
           ),
-          const SizedBox(height: 12),
-          _DetailRow(
-            label: 'Coordinates',
-            value:
-                '${_center.latitude.toStringAsFixed(4)}, ${_center.longitude.toStringAsFixed(4)}',
+          const SizedBox(width: 4),
+          const Text(
+            'PM2.5',
+            style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600),
           ),
-          if (data != null) ...[
-            _DetailRow(
-              label: 'AQI',
-              value: data.aqi != null ? '${data.aqi}' : 'N/A',
-            ),
-            _DetailRow(
-              label: 'PM2.5',
-              value: data.pm25 != null
-                  ? '${data.pm25!.toStringAsFixed(1)} µg/m³'
-                  : 'N/A',
-            ),
-            _DetailRow(
-              label: 'O₃',
-              value: data.ozone != null
-                  ? '${data.ozone!.toStringAsFixed(1)} µg/m³'
-                  : 'N/A',
-            ),
-            _DetailRow(
-              label: 'Temperature',
-              value: data.temperature != null
-                  ? '${data.temperature!.toStringAsFixed(1)}°C'
-                  : 'N/A',
-            ),
-            _DetailRow(
-              label: 'Precipitation',
-              value: data.precipitation != null
-                  ? '${data.precipitation!.toStringAsFixed(1)} mm'
-                  : 'N/A',
-            ),
-          ] else
-            const Text(
-              'Loading data...',
-              style: TextStyle(fontSize: 12, color: Colors.grey),
-            ),
         ],
       ),
     );
   }
 
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Map'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _loading ? null : _fetchCenterData,
-          ),
-        ],
+  // 简化的空气质量等级说明
+  Widget _buildSimpleAQILegend() {
+    return Container(
+      padding: const EdgeInsets.all(8),
+      decoration: BoxDecoration(
+        color: Colors.grey[50],
+        borderRadius: BorderRadius.circular(6),
       ),
-      body: Stack(
+      child: Row(
         children: [
-          // 地图主体
-          FlutterMap(
-            mapController: _mapController,
-            options: MapOptions(
-              initialCenter: _center,
-              initialZoom: 15,
-              minZoom: 3,
-              maxZoom: 18,
-              interactionOptions: const InteractionOptions(
-                flags:
-                    InteractiveFlag.drag |
-                    InteractiveFlag.flingAnimation |
-                    InteractiveFlag.pinchZoom |
-                    InteractiveFlag.doubleTapZoom |
-                    InteractiveFlag.scrollWheelZoom,
-              ),
-              onTap: _onMapTap,
-              onPositionChanged: (position, _) {
-                final z = position.zoom;
-                final c = position.center;
-                if (z != null) _currentZoom = z;
-                if (c != null) _currentCenter = c;
-              },
-            ),
-            children: [
-              TileLayer(
-                // 使用更美观的 CartoDB 地图样式
-                urlTemplate: 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png',
-                subdomains: const ['a', 'b', 'c', 'd'],
-                userAgentPackageName: 'com.example.cityzen',
-                additionalOptions: const {
-                  'attribution': '© CartoDB © OpenStreetMap contributors',
-                },
-              ),
-              
-              // 热力图层 - 显示污染分布
-              if (_showHeatmap && _airQualityGrid != null)
-                AirQualityHeatmapLayer(
-                  grid: _airQualityGrid!,
-                  pollutant: _selectedPollutant,
-                  opacity: 0.6,
-                ),
-              
-              // 监测站标记层
-              if (_showStations)
-                AirQualityStationsLayer(
-                  stations: _stations,
-                  selectedPollutant: _selectedPollutant,
-                  onStationTap: (station) {
-                    showDialog(
-                      context: context,
-                      builder: (context) => StationDetailDialog(station: station),
-                    );
-                  },
-                ),
-              CircleLayer(
-                circles: _nearbyParks
-                    .map(
-                      (park) => CircleMarker(
-                        point: park.location,
-                        color: Colors.green.withOpacity(0.16),
-                        borderColor: Colors.green[700]!,
-                        borderStrokeWidth: 1.5,
-                        radius: 24,
-                      ),
-                    )
-                    .toList(),
-              ),
-              // 仅显示中心点（米兰）
-              MarkerLayer(
-                markers: [
-                  Marker(
-                    point: _center,
-                    width: 40,
-                    height: 40,
-                    child: Container(
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          colors: [
-                            _centerColor(),
-                            _centerColor().withOpacity(0.8),
-                          ],
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                        ),
-                        shape: BoxShape.circle,
-                        border: Border.all(color: Colors.white, width: 3),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withOpacity(0.3),
-                            blurRadius: 8,
-                            offset: const Offset(0, 4),
-                          ),
-                        ],
-                      ),
-                      child: Icon(
-                        Icons.location_on,
-                        color: Colors.white,
-                        size: 20,
-                      ),
-                    ),
-                  ),
-                  ..._nearbyParks.map(
-                    (park) => Marker(
-                      point: park.location,
-                      width: 24,
-                      height: 24,
-                      child: Tooltip(
-                        message: park.name,
-                        child: Container(
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            shape: BoxShape.circle,
-                            border: Border.all(
-                              color: Colors.green[700]!,
-                              width: 2,
-                            ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.15),
-                                blurRadius: 3,
-                                offset: const Offset(0, 1),
-                              ),
-                            ],
-                          ),
-                          padding: const EdgeInsets.all(4),
-                          child: Icon(
-                            Icons.park,
-                            color: Colors.green[700],
-                            size: 16,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-
-          // 加载指示器
-          if (_loading)
-            Container(
-              color: Colors.black26,
-              child: const Center(
-                child: Card(
-                  child: Padding(
-                    padding: EdgeInsets.all(20),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        CircularProgressIndicator(),
-                        SizedBox(height: 16),
-                        Text('Loading environmental data...'),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-            ),
-
-          // 错误提示
-          if (_error != null && !_loading)
-            Positioned(
-              top: 80,
-              left: 16,
-              right: 16,
-              child: Card(
-                color: Colors.red[50],
-                child: Padding(
-                  padding: const EdgeInsets.all(12),
-                  child: Text(
-                    'Error: $_error',
-                    style: TextStyle(color: Colors.red[900]),
-                  ),
-                ),
-              ),
-            ),
-
-          // No parks nearby notification
-          if (_error == null &&
-              !_loading &&
-              !_parksLoading &&
-              _nearbyParks.isEmpty)
-            Positioned(
-              top: 80,
-              left: 16,
-              right: 16,
-              child: Card(
-                color: Colors.green[50],
-                child: const Padding(
-                  padding: EdgeInsets.all(12),
-                  child: Text(
-                    'No parks/green areas found within 2 km',
-                    style: TextStyle(color: Colors.black87),
-                  ),
-                ),
-              ),
-            ),
-
-          // Unified Control Panel
-          Positioned(
-            top: 16,
-            left: 16,
-            right: 16,
-            child: Card(
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Column(
-                  children: [
-                    // Pollutant selection
-                    Row(
-                      children: [
-                        const Text('Pollutant: ', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
-                        Expanded(
-                          child: Row(
-                            children: [
-                              _buildPollutantChip('PM2.5'),
-                              const SizedBox(width: 4),
-                              _buildPollutantChip('PM10'),
-                              const SizedBox(width: 4),
-                              _buildPollutantChip('O3'),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                    
-                    const SizedBox(height: 8),
-                    
-                    // Display options
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Row(
-                            children: [
-                              Checkbox(
-                                value: _showHeatmap,
-                                onChanged: (value) => setState(() => _showHeatmap = value ?? true),
-                                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                              ),
-                              const Text('Heatmap', style: TextStyle(fontSize: 12)),
-                            ],
-                          ),
-                        ),
-                        Expanded(
-                          child: Row(
-                            children: [
-                              Checkbox(
-                                value: _showStations,
-                                onChanged: (value) => setState(() => _showStations = value ?? true),
-                                materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                              ),
-                              const Text('Stations', style: TextStyle(fontSize: 12)),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-
-          // Dynamic Heatmap Legend - positioned on the right side
-          if (_showHeatmap)
-            Positioned(
-              top: 200, // 调整回更合适的位置
-              right: 16,
-              child: AirQualityLegend(
-                pollutant: _selectedPollutant,
-              ),
-            ),
-
-          // Manual location input button
-          Positioned(
-            bottom: 70,
-            right: 16,
-            child: FloatingActionButton(
-              heroTag: 'manualLocation',
-              mini: true,
-              backgroundColor: Colors.orange,
-              onPressed: _showManualLocationDialog,
-              child: const Icon(Icons.edit_location, color: Colors.white),
-            ),
-          ),
-          Positioned(
-            bottom: 120,
-            right: 16,
-            child: FloatingActionButton(
-              heroTag: 'recenter',
-              mini: true,
-              backgroundColor: _loading ? Colors.grey : Colors.white,
-              onPressed: _loading ? null : _recenterToMyLocation,
-              child: _loading 
-                ? const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.my_location, color: AppColors.primary),
-            ),
-          ),
-
-          // 右下：缩放按钮
-          Positioned(
-            bottom: 16,
-            right: 16,
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                FloatingActionButton(
-                  heroTag: 'zoomIn',
-                  mini: true,
-                  backgroundColor: Colors.white,
-                  onPressed: _zoomIn,
-                  child: const Icon(Icons.add, color: Colors.black87),
-                ),
-                const SizedBox(height: 8),
-                FloatingActionButton(
-                  heroTag: 'zoomOut',
-                  mini: true,
-                  backgroundColor: Colors.white,
-                  onPressed: _zoomOut,
-                  child: const Icon(Icons.remove, color: Colors.black87),
-                ),
-              ],
-            ),
-          ),
-
-          // Bottom left: AQI Legend (only when heatmap is disabled)
-          if (!_showHeatmap)
-            Positioned(
-              bottom: 16,
-              left: 16,
-              child: _MapLegend(layerType: _selectedLayer),
-            ),
+          _buildMiniAQIItem('Good', const Color(0xFF4CAF50)),
+          _buildMiniAQIItem('Fair', const Color(0xFF8BC34A)),
+          _buildMiniAQIItem('Moderate', const Color(0xFFFFEB3B)),
+          _buildMiniAQIItem('Poor', const Color(0xFFFF9800)),
+          _buildMiniAQIItem('V.Poor', const Color(0xFFF44336)),
         ],
       ),
     );
   }
 
-  void _zoomIn() {
-    final nextZoom = (_currentZoom + 1).clamp(3.0, 18.0);
-    _mapController.move(_currentCenter, nextZoom);
-  }
-
-  void _zoomOut() {
-    final nextZoom = (_currentZoom - 1).clamp(3.0, 18.0);
-    _mapController.move(_currentCenter, nextZoom);
-  }
-
-  // 构建污染物选择芯片
-  Widget _buildPollutantChip(String pollutant) {
-    final isSelected = _selectedPollutant == pollutant;
+  // 迷你空气质量项
+  Widget _buildMiniAQIItem(String label, Color color) {
     return Expanded(
-      child: GestureDetector(
-        onTap: () {
-          setState(() {
-            _selectedPollutant = pollutant;
-          });
-        },
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
-          decoration: BoxDecoration(
-            color: isSelected ? AppColors.primary : Colors.grey[200],
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Text(
-            pollutant,
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              fontSize: 11,
-              fontWeight: FontWeight.w600,
-              color: isSelected ? Colors.white : Colors.black87,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// 图层选择器
-class _LayerSelector extends StatelessWidget {
-  final String selectedLayer;
-  final ValueChanged<String> onLayerChanged;
-
-  const _LayerSelector({
-    required this.selectedLayer,
-    required this.onLayerChanged,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final layers = ['AQI', 'PM2.5', 'O₃', 'Rain'];
-
-    return Container(
-      height: 48,
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(24),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.1),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-        children: layers.map((layer) {
-          final isSelected = layer == selectedLayer;
-          return Expanded(
-            child: GestureDetector(
-              onTap: () => onLayerChanged(layer),
-              child: Container(
-                margin: const EdgeInsets.all(4),
-                decoration: BoxDecoration(
-                  color: isSelected ? AppColors.primary : Colors.transparent,
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                alignment: Alignment.center,
-                child: Text(
-                  layer,
-                  style: TextStyle(
-                    fontWeight: FontWeight.w600,
-                    color: isSelected ? Colors.white : Colors.black87,
-                    fontSize: 14,
-                  ),
-                ),
-              ),
-            ),
-          );
-        }).toList(),
-      ),
-    );
-  }
-}
-
-// 地图图例
-class _MapLegend extends StatelessWidget {
-  final String layerType;
-
-  const _MapLegend({required this.layerType});
-
-  @override
-  Widget build(BuildContext context) {
-    final legend = _getLegendData(layerType);
-
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.1),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(
-            legend.title,
-            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12),
+          Container(
+            width: 6,
+            height: 6,
+            decoration: BoxDecoration(
+              color: color,
+              shape: BoxShape.circle,
+            ),
           ),
-          const SizedBox(height: 8),
-          ...legend.items.map((item) {
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 4),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    width: 16,
-                    height: 16,
-                    decoration: BoxDecoration(
-                      color: item.color,
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(item.label, style: const TextStyle(fontSize: 11)),
-                ],
-              ),
-            );
-          }),
-        ],
-      ),
-    );
-  }
-
-  ({String title, List<({Color color, String label})> items}) _getLegendData(
-    String layer,
-  ) {
-    switch (layer) {
-      case 'AQI':
-        return (
-          title: 'AQI Index',
-          items: [
-            (color: Colors.green, label: 'Good (0-50)'),
-            (color: Colors.yellow, label: 'Moderate (51-100)'),
-            (color: Colors.orange, label: 'Unhealthy (101-150)'),
-            (color: Colors.red, label: 'Very Unhealthy (151+)'),
-          ],
-        );
-      case 'PM2.5':
-        return (
-          title: 'PM2.5 (µg/m³)',
-          items: [
-            (color: Colors.green, label: 'Good (0-10)'),
-            (color: Colors.amber, label: 'Moderate (10-25)'),
-            (color: Colors.red, label: 'Poor (25+)'),
-          ],
-        );
-      case 'O₃':
-        return (
-          title: 'Ozone (O₃) µg/m³',
-          items: [
-            (color: Colors.green, label: 'Good (0-60)'),
-            (color: Colors.yellow, label: 'Moderate (61-120)'),
-            (color: Colors.orange, label: 'Unhealthy (121-180)'),
-            (color: Colors.red, label: 'Very Unhealthy (181+)'),
-          ],
-        );
-      case 'Rain':
-        return (
-          title: 'Precipitation (mm)',
-          items: [
-            (color: Colors.grey[300]!, label: 'None (0)'),
-            (color: Colors.lightBlue[200]!, label: 'Light (0-5)'),
-            (color: Colors.blue, label: 'Moderate (5-20)'),
-            (color: Colors.indigo, label: 'Heavy (20+)'),
-          ],
-        );
-      default:
-        return (title: 'Unknown', items: []);
-    }
-  }
-}
-
-class ParkPoi {
-  final String name;
-  final LatLng location;
-
-  ParkPoi({required this.name, required this.location});
-}
-
-// Bottom Sheet 详情行
-class _DetailRow extends StatelessWidget {
-  final String label;
-  final String value;
-
-  const _DetailRow({required this.label, required this.value});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 6),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(label, style: const TextStyle(color: Colors.black54)),
-          Text(value, style: const TextStyle(fontWeight: FontWeight.w600)),
+          const SizedBox(width: 3),
+          Flexible(
+            child: Text(
+              label,
+              style: const TextStyle(fontSize: 8),
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
         ],
       ),
     );
@@ -2389,6 +1298,7 @@ class _ActivityPageState extends State<ActivityPage> {
   late final GeminiAIService _aiService;
   bool _isAILoading = false;
   final EnvironmentDataManager _envManager = EnvironmentDataManager();
+  final AIConfigManager _aiConfigManager = AIConfigManager();
 
   // 当前环境数据（从全局管理器获取）
   EnvironmentData? get _currentEnvironmentData => _envManager.currentData;
@@ -2515,12 +1425,91 @@ class _ActivityPageState extends State<ActivityPage> {
   }
 
   Widget _buildAIChat() {
+    // 检查AI是否已配置
+    if (!_aiConfigManager.isConfigured) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                Icons.smart_toy_outlined,
+                size: 64,
+                color: Colors.grey[400],
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'AI Assistant Not Configured',
+                style: Theme.of(context).textTheme.headlineSmall,
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                'To use the AI environmental health assistant, you need to configure your Gemini API key.',
+                style: Theme.of(context).textTheme.bodyMedium,
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 24),
+              ElevatedButton.icon(
+                onPressed: () {
+                  // 显示配置说明对话框
+                  showDialog(
+                    context: context,
+                    builder: (context) => AlertDialog(
+                      title: const Text('Configure AI Assistant'),
+                      content: const Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('To enable the AI assistant:'),
+                          SizedBox(height: 8),
+                          Text('1. Go to Settings page'),
+                          Text('2. Tap "AI Configuration"'),
+                          Text('3. Enter your Gemini API key'),
+                          SizedBox(height: 12),
+                          Text(
+                            'Get your free API key from: https://aistudio.google.com/api-keys',
+                            style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic),
+                          ),
+                        ],
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.of(context).pop(),
+                          child: const Text('OK'),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+                icon: const Icon(Icons.settings),
+                label: const Text('Setup Instructions'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Get your free API key from: https://aistudio.google.com/api-keys',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Colors.grey[600],
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     return Column(
       children: [
         Expanded(
           child: ListView.builder(
             padding: const EdgeInsets.all(16),
-            reverse: false, // 改为正序显示
+            reverse: false,
             itemCount: _chatMessages.length + (_isAILoading ? 1 : 0),
             itemBuilder: (context, index) {
               if (index == _chatMessages.length && _isAILoading) {
@@ -2597,7 +1586,7 @@ class _ActivityPageState extends State<ActivityPage> {
                       ),
                       onSubmitted: _isAILoading ? null : _sendChatMessage,
                       enabled: !_isAILoading,
-                      maxLines: null, // 允许多行输入
+                      maxLines: null,
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -2719,165 +1708,109 @@ class SettingsPage extends StatefulWidget {
 class _SettingsPageState extends State<SettingsPage> {
   bool _notificationsEnabled = true;
   bool _locationEnabled = true;
-  bool _darkModeEnabled = false;
-  bool _autoRefresh = true;
   String _temperatureUnit = 'Celsius';
-  String _distanceUnit = 'Kilometers';
-  double _airQualityThreshold = 25.0;
-  double _windSpeedThreshold = 15.0;
-
-  final List<String> _temperatureUnits = ['Celsius', 'Fahrenheit'];
-  final List<String> _distanceUnits = ['Kilometers', 'Miles'];
-
-  // AI配置相关
   final AIConfigManager _aiConfigManager = AIConfigManager();
-  final TextEditingController _apiKeyController = TextEditingController();
-  final TextEditingController _customModelController = TextEditingController();
-  final TextEditingController _baseUrlController = TextEditingController();
+  final BackgroundDataService _backgroundService = BackgroundDataService.instance;
+  bool _backgroundDataEnabled = false;
 
   @override
   void initState() {
     super.initState();
-    _loadSettings();
-    _loadAIConfig();
+    _aiConfigManager.loadConfig();
   }
 
-  @override
-  void dispose() {
-    _apiKeyController.dispose();
-    _customModelController.dispose();
-    _baseUrlController.dispose();
-    super.dispose();
-  }
+  void _showAIConfigDialog(BuildContext context) {
+    final TextEditingController apiKeyController = TextEditingController();
+    apiKeyController.text = _aiConfigManager.apiKey;
 
-  Future<void> _loadAIConfig() async {
-    await _aiConfigManager.loadConfig();
-    setState(() {
-      _apiKeyController.text = _aiConfigManager.apiKey;
-      _customModelController.text = _aiConfigManager.model;
-      _baseUrlController.text = _aiConfigManager.baseUrl;
-    });
-  }
-
-  Future<void> _loadSettings() async {
-    final prefs = await SharedPreferences.getInstance();
-    setState(() {
-      _notificationsEnabled = prefs.getBool('notifications_enabled') ?? true;
-      _locationEnabled = prefs.getBool('location_enabled') ?? true;
-      _darkModeEnabled = prefs.getBool('dark_mode_enabled') ?? false;
-      _autoRefresh = prefs.getBool('auto_refresh') ?? true;
-      _temperatureUnit = prefs.getString('temperature_unit') ?? 'Celsius';
-      _distanceUnit = prefs.getString('distance_unit') ?? 'Kilometers';
-      _airQualityThreshold = prefs.getDouble('air_quality_threshold') ?? 25.0;
-      _windSpeedThreshold = prefs.getDouble('wind_speed_threshold') ?? 15.0;
-    });
-  }
-
-  Future<void> _saveSettings() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('notifications_enabled', _notificationsEnabled);
-    await prefs.setBool('location_enabled', _locationEnabled);
-    await prefs.setBool('dark_mode_enabled', _darkModeEnabled);
-    await prefs.setBool('auto_refresh', _autoRefresh);
-    await prefs.setString('temperature_unit', _temperatureUnit);
-    await prefs.setString('distance_unit', _distanceUnit);
-    await prefs.setDouble('air_quality_threshold', _airQualityThreshold);
-    await prefs.setDouble('wind_speed_threshold', _windSpeedThreshold);
-  }
-
-  void _showLocationInfo() {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('Location Information'),
-        content: const Column(
+        title: const Text('Configure Gemini AI'),
+        content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(
-              'CityZen is currently configured for Milan, Italy.',
-              style: TextStyle(fontSize: 16),
+            const Text(
+              'Enter your Google Gemini API key to enable AI chat features.',
+              style: TextStyle(fontSize: 14),
             ),
-            SizedBox(height: 12),
-            Text(
-              'Location: 45°28\'51.3"N 9°13\'30.4"E',
-              style: TextStyle(fontSize: 14, color: Colors.grey),
+            const SizedBox(height: 16),
+            TextField(
+              controller: apiKeyController,
+              decoration: const InputDecoration(
+                labelText: 'Gemini API Key',
+                hintText: 'AIza...',
+                border: OutlineInputBorder(),
+              ),
+              obscureText: true,
             ),
-            SizedBox(height: 8),
+            const SizedBox(height: 12),
             Text(
-              'All environmental data is sourced from monitoring stations in the Milan metropolitan area.',
-              style: TextStyle(fontSize: 14, color: Colors.grey),
+              'Get your API key from: https://aistudio.google.com/api-keys',
+              style: TextStyle(
+                fontSize: 12,
+                color: Colors.grey[600],
+              ),
             ),
           ],
         ),
         actions: [
-          FilledButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('OK'),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () async {
+              final apiKey = apiKeyController.text.trim();
+              if (apiKey.isNotEmpty) {
+                await _aiConfigManager.saveConfig(
+                  provider: AIProvider.gemini,
+                  apiKey: apiKey,
+                );
+                setState(() {}); // 刷新UI
+                Navigator.of(context).pop();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('AI configuration saved successfully!'),
+                    backgroundColor: Colors.green,
+                  ),
+                );
+              }
+            },
+            child: const Text('Save'),
           ),
         ],
       ),
     );
   }
 
-  void _showThresholdDialog(String type) {
-    final isAirQuality = type == 'air_quality';
-    final currentValue = isAirQuality
-        ? _airQualityThreshold
-        : _windSpeedThreshold;
-    final controller = TextEditingController(text: currentValue.toString());
-
+  void _showThreadingDemo() {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Text(
-          'Set ${isAirQuality ? 'Air Quality' : 'Wind Speed'} Threshold',
-        ),
-        content: Column(
+        title: const Text('Multi-Threading Demo'),
+        content: const Column(
           mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            TextField(
-              controller: controller,
-              keyboardType: TextInputType.number,
-              decoration: InputDecoration(
-                labelText: isAirQuality ? 'PM2.5 (µg/m³)' : 'Wind Speed (km/h)',
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-              ),
-            ),
-            const SizedBox(height: 12),
+            Text('CityZen demonstrates multi-threading through:'),
+            SizedBox(height: 8),
+            Text('• Background Isolates for data processing'),
+            Text('• Compute functions for heavy calculations'),
+            Text('• Concurrent API calls with Future.wait'),
+            Text('• Stream-based async data processing'),
+            SizedBox(height: 12),
             Text(
-              isAirQuality
-                  ? 'Activities will be marked as risky above this PM2.5 level'
-                  : 'Activities will be marked as risky above this wind speed',
-              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
+              'Enable "Background Data Sync" to see Isolates in action!',
+              style: TextStyle(fontWeight: FontWeight.bold),
             ),
           ],
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () {
-              final value = double.tryParse(controller.text);
-              if (value != null && value > 0) {
-                setState(() {
-                  if (isAirQuality) {
-                    _airQualityThreshold = value;
-                  } else {
-                    _windSpeedThreshold = value;
-                  }
-                });
-                _saveSettings();
-                Navigator.pop(context);
-              }
-            },
-            child: const Text('Save'),
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('OK'),
           ),
         ],
       ),
@@ -2931,7 +1864,7 @@ class _SettingsPageState extends State<SettingsPage> {
                             ),
                             SizedBox(height: 4),
                             Text(
-                              'Health & Fitness Enthusiast',
+                              'Environmental Health Enthusiast',
                               style: TextStyle(
                                 fontSize: 14,
                                 color: Colors.grey,
@@ -2955,7 +1888,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   icon: Icons.location_city,
                   title: 'Location',
                   subtitle: 'Milan, Italy (Fixed)',
-                  onTap: _showLocationInfo,
+                  onTap: () {},
                 ),
                 _SettingsTile(
                   icon: Icons.my_location,
@@ -2965,62 +1898,9 @@ class _SettingsPageState extends State<SettingsPage> {
                     value: _locationEnabled,
                     onChanged: (value) {
                       setState(() => _locationEnabled = value);
-                      _saveSettings();
                     },
                     activeColor: AppColors.primary,
                   ),
-                ),
-                _SettingsTile(
-                  icon: Icons.refresh,
-                  title: 'Auto Refresh Data',
-                  subtitle: _autoRefresh ? 'Every 30 minutes' : 'Manual only',
-                  trailing: Switch(
-                    value: _autoRefresh,
-                    onChanged: (value) {
-                      setState(() => _autoRefresh = value);
-                      _saveSettings();
-                    },
-                    activeColor: AppColors.primary,
-                  ),
-                ),
-              ],
-            ),
-
-            // Units & Preferences Section
-            _SettingsSection(
-              title: 'Units & Preferences',
-              children: [
-                _SettingsTile(
-                  icon: Icons.thermostat,
-                  title: 'Temperature Unit',
-                  subtitle: _temperatureUnit,
-                  onTap: () => _showUnitSelector('temperature'),
-                ),
-                _SettingsTile(
-                  icon: Icons.straighten,
-                  title: 'Distance Unit',
-                  subtitle: _distanceUnit,
-                  onTap: () => _showUnitSelector('distance'),
-                ),
-              ],
-            ),
-
-            // Health Thresholds Section
-            _SettingsSection(
-              title: 'Health Thresholds',
-              children: [
-                _SettingsTile(
-                  icon: Icons.air,
-                  title: 'Air Quality Threshold',
-                  subtitle:
-                      '${_airQualityThreshold.toStringAsFixed(1)} µg/m³ PM2.5',
-                  onTap: () => _showThresholdDialog('air_quality'),
-                ),
-                _SettingsTile(
-                  icon: Icons.air,
-                  title: 'Wind Speed Threshold',
-                  subtitle: '${_windSpeedThreshold.toStringAsFixed(1)} km/h',
-                  onTap: () => _showThresholdDialog('wind_speed'),
                 ),
               ],
             ),
@@ -3037,93 +1917,66 @@ class _SettingsPageState extends State<SettingsPage> {
                     value: _notificationsEnabled,
                     onChanged: (value) {
                       setState(() => _notificationsEnabled = value);
-                      _saveSettings();
+                    },
+                    activeColor: AppColors.primary,
+                  ),
+                ),
+              ],
+            ),
+
+            // Performance & Threading Section
+            _SettingsSection(
+              title: 'Performance & Threading',
+              children: [
+                _SettingsTile(
+                  icon: Icons.sync,
+                  title: 'Background Data Sync',
+                  subtitle: _backgroundDataEnabled ? 'Active (Multi-threading)' : 'Disabled',
+                  trailing: Switch(
+                    value: _backgroundDataEnabled,
+                    onChanged: (value) async {
+                      if (value) {
+                        await _backgroundService.startBackgroundFetching();
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Background data sync enabled (using Isolates)'),
+                            backgroundColor: Colors.green,
+                          ),
+                        );
+                      } else {
+                        await _backgroundService.stopBackgroundFetching();
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Background data sync disabled'),
+                            backgroundColor: Colors.orange,
+                          ),
+                        );
+                      }
+                      setState(() => _backgroundDataEnabled = value);
                     },
                     activeColor: AppColors.primary,
                   ),
                 ),
                 _SettingsTile(
-                  icon: Icons.schedule,
-                  title: 'Daily Recommendations',
-                  subtitle: 'Get AI-powered activity suggestions',
-                  trailing: Switch(
-                    value: true,
-                    onChanged: (value) {},
-                    activeColor: AppColors.primary,
-                  ),
+                  icon: Icons.memory,
+                  title: 'Threading Demo',
+                  subtitle: 'Test multi-threading capabilities',
+                  onTap: () => _showThreadingDemo(),
                 ),
               ],
             ),
 
             // AI Configuration Section
             _SettingsSection(
-              title: 'AI Configuration',
+              title: 'AI Assistant',
               children: [
                 _SettingsTile(
                   icon: Icons.smart_toy,
-                  title: 'AI Provider',
-                  subtitle: _aiConfigManager.currentProvider.displayName,
-                  onTap: () => _showAIProviderSelector(),
-                ),
-                _SettingsTile(
-                  icon: Icons.key,
-                  title: 'API Key',
-                  subtitle: _aiConfigManager.apiKey.isEmpty
-                      ? 'Not configured'
-                      : '${_aiConfigManager.apiKey.substring(0, 8)}...',
-                  onTap: () => _showAPIKeyDialog(),
-                ),
-                if (_aiConfigManager.currentProvider != AIProvider.gemini)
-                  _SettingsTile(
-                    icon: Icons.settings,
-                    title: 'Model Settings',
-                    subtitle: _aiConfigManager.model,
-                    onTap: () => _showModelSettingsDialog(),
-                  ),
-                _SettingsTile(
-                  icon: _aiConfigManager.isConfigured
-                      ? Icons.check_circle
-                      : Icons.error,
-                  title: 'AI Status',
-                  subtitle: _aiConfigManager.isConfigured
-                      ? 'Ready'
-                      : 'Not configured',
-                  trailing: Container(
-                    width: 12,
-                    height: 12,
-                    decoration: BoxDecoration(
-                      color: _aiConfigManager.isConfigured
-                          ? Colors.green
-                          : Colors.red,
-                      shape: BoxShape.circle,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-
-            // App Settings Section
-            _SettingsSection(
-              title: 'App Settings',
-              children: [
-                _SettingsTile(
-                  icon: Icons.dark_mode,
-                  title: 'Dark Mode',
-                  subtitle: _darkModeEnabled ? 'Enabled' : 'Disabled',
-                  trailing: Switch(
-                    value: _darkModeEnabled,
-                    onChanged: (value) {
-                      setState(() => _darkModeEnabled = value);
-                      _saveSettings();
-                    },
-                    activeColor: AppColors.primary,
-                  ),
-                ),
-                _SettingsTile(
-                  icon: Icons.language,
-                  title: 'Language',
-                  subtitle: 'English',
-                  onTap: () {},
+                  title: 'AI Configuration',
+                  subtitle: AIConfigManager().isConfigured 
+                      ? 'Gemini AI configured' 
+                      : 'Configure Gemini API key',
+                  onTap: () => _showAIConfigDialog(context),
                 ),
               ],
             ),
@@ -3135,19 +1988,7 @@ class _SettingsPageState extends State<SettingsPage> {
                 _SettingsTile(
                   icon: Icons.info,
                   title: 'About CityZen',
-                  subtitle: 'Version 1.0.0',
-                  onTap: () => _showAboutDialog(),
-                ),
-                _SettingsTile(
-                  icon: Icons.privacy_tip,
-                  title: 'Privacy Policy',
-                  subtitle: 'How we protect your data',
-                  onTap: () {},
-                ),
-                _SettingsTile(
-                  icon: Icons.help,
-                  title: 'Help & Support',
-                  subtitle: 'Get help using CityZen',
+                  subtitle: 'Version 1.0.0 - Environmental Health Assistant',
                   onTap: () {},
                 ),
               ],
@@ -3161,7 +2002,15 @@ class _SettingsPageState extends State<SettingsPage> {
                   icon: Icons.logout,
                   title: 'Sign Out',
                   subtitle: 'Switch to a different account',
-                  onTap: () => _showLogoutDialog(),
+                  onTap: () async {
+                    await AuthServiceDemo.instance.signOut();
+                    if (mounted) {
+                      Navigator.of(context).pushNamedAndRemoveUntil(
+                        '/',
+                        (route) => false,
+                      );
+                    }
+                  },
                 ),
               ],
             ),
@@ -3169,339 +2018,6 @@ class _SettingsPageState extends State<SettingsPage> {
             const SizedBox(height: 32),
           ],
         ),
-      ),
-    );
-  }
-
-  void _showUnitSelector(String type) {
-    final isTemperature = type == 'temperature';
-    final units = isTemperature ? _temperatureUnits : _distanceUnits;
-    final currentUnit = isTemperature ? _temperatureUnit : _distanceUnit;
-
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (context) => Container(
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 40,
-              height: 4,
-              margin: const EdgeInsets.only(top: 12),
-              decoration: BoxDecoration(
-                color: Colors.grey[300],
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.all(20),
-              child: Text(
-                'Select ${isTemperature ? 'Temperature' : 'Distance'} Unit',
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-            ...units.map(
-              (unit) => ListTile(
-                title: Text(unit),
-                trailing: currentUnit == unit
-                    ? Icon(Icons.check, color: AppColors.primary)
-                    : null,
-                onTap: () {
-                  setState(() {
-                    if (isTemperature) {
-                      _temperatureUnit = unit;
-                    } else {
-                      _distanceUnit = unit;
-                    }
-                  });
-                  _saveSettings();
-                  Navigator.pop(context);
-                },
-              ),
-            ),
-            const SizedBox(height: 20),
-          ],
-        ),
-      ),
-    );
-  }
-
-  void _showAboutDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Row(
-          children: [
-            Container(
-              width: 40,
-              height: 40,
-              decoration: BoxDecoration(
-                color: AppColors.primary,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: const Icon(Icons.eco, color: Colors.white),
-            ),
-            const SizedBox(width: 12),
-            const Text('CityZen'),
-          ],
-        ),
-        content: const Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Urban Health Companion',
-              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-            ),
-            SizedBox(height: 8),
-            Text(
-              'CityZen helps urban dwellers make informed decisions about outdoor activities by combining real-time environmental data with AI-powered recommendations.',
-            ),
-            SizedBox(height: 16),
-            Text(
-              'Version: 1.0.0\nBuild: 2024.12.26',
-              style: TextStyle(fontSize: 12, color: Colors.grey),
-            ),
-          ],
-        ),
-        actions: [
-          FilledButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Close'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showLogoutDialog() {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('Sign Out'),
-        content: const Text(
-          'Are you sure you want to sign out? You will need to sign in again to access your personalized data.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () async {
-              Navigator.pop(context);
-              await AuthServiceDemo.instance.signOut();
-              if (mounted) {
-                Navigator.of(context).pushNamedAndRemoveUntil(
-                  '/',
-                  (route) => false,
-                );
-              }
-            },
-            style: FilledButton.styleFrom(
-              backgroundColor: Colors.red,
-            ),
-            child: const Text('Sign Out'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showAIProviderSelector() {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      builder: (context) => Container(
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 40,
-              height: 4,
-              margin: const EdgeInsets.only(top: 12),
-              decoration: BoxDecoration(
-                color: Colors.grey[300],
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            const Padding(
-              padding: EdgeInsets.all(20),
-              child: Text(
-                'Select AI Provider',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
-              ),
-            ),
-            ...AIProvider.values.map(
-              (provider) => ListTile(
-                leading: Icon(_getProviderIcon(provider)),
-                title: Text(provider.displayName),
-                subtitle: Text(_aiConfigManager.getConfigHint(provider)),
-                trailing: _aiConfigManager.currentProvider == provider
-                    ? Icon(Icons.check, color: AppColors.primary)
-                    : null,
-                onTap: () async {
-                  await _aiConfigManager.saveConfig(provider: provider);
-                  setState(() {});
-                  Navigator.pop(context);
-                },
-              ),
-            ),
-            const SizedBox(height: 20),
-          ],
-        ),
-      ),
-    );
-  }
-
-  IconData _getProviderIcon(AIProvider provider) {
-    switch (provider) {
-      case AIProvider.gemini:
-        return Icons.auto_awesome;
-      case AIProvider.openai:
-        return Icons.psychology;
-      case AIProvider.claude:
-        return Icons.chat;
-    }
-  }
-
-  void _showAPIKeyDialog() {
-    _apiKeyController.text = _aiConfigManager.apiKey;
-
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: Text('${_aiConfigManager.currentProvider.displayName} API Key'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: _apiKeyController,
-              decoration: InputDecoration(
-                labelText: 'API Key',
-                hintText: 'Enter your API key',
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                prefixIcon: const Icon(Icons.key),
-              ),
-              obscureText: true,
-            ),
-            const SizedBox(height: 12),
-            Text(
-              _aiConfigManager.getConfigHint(_aiConfigManager.currentProvider),
-              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () async {
-              final key = _apiKeyController.text.trim();
-              if (_aiConfigManager.validateApiKey(
-                key,
-                _aiConfigManager.currentProvider,
-              )) {
-                await _aiConfigManager.saveConfig(apiKey: key);
-                setState(() {});
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('API Key saved successfully')),
-                );
-              } else {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Invalid API Key format')),
-                );
-              }
-            },
-            child: const Text('Save'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  void _showModelSettingsDialog() {
-    _customModelController.text = _aiConfigManager.model;
-    _baseUrlController.text = _aiConfigManager.baseUrl;
-
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('Advanced AI Settings'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: _customModelController,
-              decoration: InputDecoration(
-                labelText: 'Model Name',
-                hintText: _aiConfigManager.currentProvider.defaultModel,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                prefixIcon: const Icon(Icons.memory),
-              ),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _baseUrlController,
-              decoration: InputDecoration(
-                labelText: 'Custom Base URL (Optional)',
-                hintText: 'https://api.example.com',
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                prefixIcon: const Icon(Icons.link),
-              ),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              'Leave empty to use default settings',
-              style: TextStyle(fontSize: 12, color: Colors.grey[600]),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () async {
-              await _aiConfigManager.saveConfig(
-                customModel: _customModelController.text.trim(),
-                baseUrl: _baseUrlController.text.trim(),
-              );
-              setState(() {});
-              Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Settings saved successfully')),
-              );
-            },
-            child: const Text('Save'),
-          ),
-        ],
       ),
     );
   }
@@ -3627,91 +2143,4 @@ class _SettingsTile extends StatelessWidget {
       ),
     );
   }
-}
-
-class _CenterText extends StatelessWidget {
-  final String text;
-  const _CenterText(this.text);
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Text(
-        text,
-        textAlign: TextAlign.center,
-        style: const TextStyle(fontSize: 20),
-      ),
-    );
-  }
-}
-
-class _ActivityCard extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  final String subtitle;
-  final Color backgroundColor;
-
-  const _ActivityCard({
-    required this.icon,
-    required this.title,
-    required this.subtitle,
-    required this.backgroundColor,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: 160,
-      margin: const EdgeInsets.only(left: 16),
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: backgroundColor,
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(icon, size: 28, color: Colors.black),
-          const SizedBox(height: 12),
-          Text(
-            title,
-            style: const TextStyle(
-              fontSize: 16,
-              fontWeight: FontWeight.w700,
-              color: Colors.black,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            subtitle,
-            style: const TextStyle(fontSize: 13, color: Colors.black87),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// 网格点数据模型
-class GridPoint {
-  final LatLng location;
-  final double? temperature;
-  final double? precipitation;
-  final double? pm25;
-  final double? pm10;
-  final double? ozone;
-  final int? aqi;
-  final int? weatherCode;
-
-  GridPoint({
-    required this.location,
-    this.temperature,
-    this.precipitation,
-    this.pm25,
-    this.pm10,
-    this.ozone,
-    this.aqi,
-    this.weatherCode,
-  });
 }
