@@ -66,6 +66,7 @@ class WeatherResult {
   final double? pm25;
   final double? pm10;
   final double? humidity;
+  final bool isFromCache;
 
   WeatherResult({
     required this.temperatureC,
@@ -74,5 +75,21 @@ class WeatherResult {
     required this.pm25,
     required this.pm10,
     required this.humidity,
+    this.isFromCache = false,
   });
+
+  factory WeatherResult.fromEnvironmentData(
+    EnvironmentData data, {
+    bool isFromCache = false,
+  }) {
+    return WeatherResult(
+      temperatureC: data.temperatureC,
+      windKmh: data.windKmh,
+      weatherCode: data.weatherCode,
+      humidity: data.humidity,
+      pm25: data.pm25,
+      pm10: data.pm10,
+      isFromCache: isFromCache,
+    );
+  }
 }

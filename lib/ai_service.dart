@@ -48,6 +48,26 @@ class GeminiAIService {
     required int? weatherCode,
     required String city,
   }) async {
+    return await getEnvironmentalAdvice(
+      userMessage: userMessage,
+      pm25: pm25,
+      pm10: pm10,
+      windSpeed: windSpeed,
+      temperature: temperature,
+      weatherCode: weatherCode,
+      city: city,
+    );
+  }
+
+  Future<String> getEnvironmentalAdvice({
+    required String userMessage,
+    required double? pm25,
+    required double? pm10,
+    required double? windSpeed,
+    required double? temperature,
+    required int? weatherCode,
+    required String city,
+  }) async {
     // 检查AI配置
     if (!_configManager.isConfigured) {
       return "AI service not configured. Please set up your AI provider and API key in Settings.";
@@ -56,35 +76,35 @@ class GeminiAIService {
     try {
       switch (_configManager.currentProvider) {
         case AIProvider.gemini:
-          return await _callGeminiAPI(userMessage, pm25, pm10, windSpeed, temperature, weatherCode, city);
+          return await _callGeminiEnvironmentalAPI(userMessage, pm25, pm10, windSpeed, temperature, weatherCode, city);
         case AIProvider.openai:
-          return await _callOpenAIAPI(userMessage, pm25, pm10, windSpeed, temperature, weatherCode, city);
+          return await _callOpenAIEnvironmentalAPI(userMessage, pm25, pm10, windSpeed, temperature, weatherCode, city);
         case AIProvider.claude:
-          return await _callClaudeAPI(userMessage, pm25, pm10, windSpeed, temperature, weatherCode, city);
+          return await _callClaudeEnvironmentalAPI(userMessage, pm25, pm10, windSpeed, temperature, weatherCode, city);
       }
     } catch (e) {
       debugPrint('AI Service Error: $e');
-      return _getSmartFallbackResponse(userMessage, pm25, windSpeed, temperature);
+      return _getSmartEnvironmentalFallback(userMessage, pm25, windSpeed, temperature);
     }
   }
 
-  Future<String> _callGeminiAPI(String userMessage, double? pm25, double? pm10, 
+  Future<String> _callGeminiEnvironmentalAPI(String userMessage, double? pm25, double? pm10, 
       double? windSpeed, double? temperature, int? weatherCode, String city) async {
     if (_geminiModel == null) {
       throw Exception('Gemini model not initialized');
     }
 
-    final systemPrompt = _buildSystemPrompt(userMessage, pm25, pm10, windSpeed, temperature, weatherCode, city);
+    final systemPrompt = _buildEnvironmentalSystemPrompt(userMessage, pm25, pm10, windSpeed, temperature, weatherCode, city);
     final content = [Content.text(systemPrompt)];
     final response = await _geminiModel!.generateContent(content);
     
     return _formatAIResponse(response.text ?? 'Sorry, I couldn\'t generate a response right now. Please try again.');
   }
 
-  Future<String> _callOpenAIAPI(String userMessage, double? pm25, double? pm10, 
+  Future<String> _callOpenAIEnvironmentalAPI(String userMessage, double? pm25, double? pm10, 
       double? windSpeed, double? temperature, int? weatherCode, String city) async {
     
-    final systemPrompt = _buildSystemPrompt(userMessage, pm25, pm10, windSpeed, temperature, weatherCode, city);
+    final systemPrompt = _buildEnvironmentalSystemPrompt(userMessage, pm25, pm10, windSpeed, temperature, weatherCode, city);
     
     final response = await http.post(
       Uri.parse(_configManager.getApiEndpoint()),
@@ -112,10 +132,10 @@ class GeminiAIService {
     }
   }
 
-  Future<String> _callClaudeAPI(String userMessage, double? pm25, double? pm10, 
+  Future<String> _callClaudeEnvironmentalAPI(String userMessage, double? pm25, double? pm10, 
       double? windSpeed, double? temperature, int? weatherCode, String city) async {
     
-    final systemPrompt = _buildSystemPrompt(userMessage, pm25, pm10, windSpeed, temperature, weatherCode, city);
+    final systemPrompt = _buildEnvironmentalSystemPrompt(userMessage, pm25, pm10, windSpeed, temperature, weatherCode, city);
     
     final response = await http.post(
       Uri.parse(_configManager.getApiEndpoint()),
@@ -143,19 +163,20 @@ class GeminiAIService {
     }
   }
 
-  String _buildSystemPrompt(String userMessage, double? pm25, double? pm10, 
+  String _buildEnvironmentalSystemPrompt(String userMessage, double? pm25, double? pm10, 
       double? windSpeed, double? temperature, int? weatherCode, String city) {
     
     // 检测用户输入的语言和意图
     String detectedLanguage = _detectLanguage(userMessage);
     String languageInstruction = _getLanguageInstruction(detectedLanguage);
-    String userIntent = _analyzeUserIntent(userMessage, detectedLanguage);
+    String userIntent = _analyzeEnvironmentalIntent(userMessage, detectedLanguage);
     
     return '''
-You are CityZen's AI fitness coach. You are friendly, helpful, and adapt to the user's communication style and needs.
+You are CityZen's AI Environmental Health Assistant. You help urban residents make informed decisions about daily activities to reduce environmental exposure risks, especially for elderly and sensitive populations.
 
 CURRENT CONDITIONS IN $city:
 • PM2.5: ${pm25?.toStringAsFixed(1) ?? 'N/A'} µg/m³
+• PM10: ${pm10?.toStringAsFixed(1) ?? 'N/A'} µg/m³
 • Temperature: ${temperature?.toStringAsFixed(1) ?? 'N/A'}°C
 • Wind Speed: ${windSpeed?.toStringAsFixed(1) ?? 'N/A'} km/h
 
@@ -174,15 +195,117 @@ RESPONSE GUIDELINES:
 6. Use emojis appropriately (1-3 per response)
 7. No headers, no bold text, no special formatting
 
-HEALTH GUIDELINES:
-• PM2.5: Good <25, Moderate 25-50, Poor >50 µg/m³
-• Always prioritize safety over performance
+HEALTH GUIDELINES FOR ENVIRONMENTAL EXPOSURE:
+• PM2.5: Good <15, Moderate 15-35, Poor 35-55, Very Poor >55 µg/m³
+• PM10: Good <25, Moderate 25-50, Poor 50-90, Very Poor >90 µg/m³
+• Focus on daily life activities: outdoor time, commuting, window opening, exercise timing
+• Consider vulnerable populations: elderly, children, respiratory/cardiovascular conditions
+• Provide practical advice for reducing exposure risks
 
-IMPORTANT: Respond naturally to the user's actual intent. If they greet you, greet them back. If they ask about weather, focus on weather. If they want exercise advice, give exercise advice. Be conversational and helpful.
+IMPORTANT: You are an environmental health assistant, not just a fitness coach. Help with:
+- When to open windows for ventilation
+- Best times for outdoor activities
+- Commuting route suggestions
+- Indoor air quality tips
+- Protective measures (masks, air purifiers)
+- Daily schedule adjustments based on pollution levels
 
 USER MESSAGE: "$userMessage"
 
 Respond appropriately in the same language and style as the user:''';
+  }
+
+  // 分析环境健康相关的用户意图
+  String _analyzeEnvironmentalIntent(String userMessage, String language) {
+    final message = userMessage.toLowerCase();
+    
+    // 问候语检测
+    if (_isGreeting(message, language)) {
+      return "USER INTENT: Greeting - The user is saying hello. Respond with a friendly greeting and briefly introduce yourself as their AI environmental health assistant.";
+    }
+    
+    // 空气质量询问
+    if (_isAirQualityQuery(message, language)) {
+      return "USER INTENT: Air Quality Inquiry - The user wants to know about current air pollution levels. Focus on PM2.5/PM10 data and health implications.";
+    }
+    
+    // 外出活动询问
+    if (_isOutdoorActivityQuery(message, language)) {
+      return "USER INTENT: Outdoor Activity Planning - The user is asking about outdoor activities or exercise. Provide advice based on current environmental conditions.";
+    }
+    
+    // 室内活动询问
+    if (_isIndoorActivityQuery(message, language)) {
+      return "USER INTENT: Indoor Environment - The user is asking about indoor air quality, ventilation, or indoor activities. Focus on indoor environmental health.";
+    }
+    
+    // 通勤/出行询问
+    if (_isCommutingQuery(message, language)) {
+      return "USER INTENT: Commuting/Travel - The user is asking about travel, commuting, or route planning. Consider pollution exposure during transportation.";
+    }
+    
+    // 健康防护询问
+    if (_isProtectionQuery(message, language)) {
+      return "USER INTENT: Health Protection - The user wants advice on protective measures against environmental exposure. Focus on masks, air purifiers, and prevention strategies.";
+    }
+    
+    // 时间相关询问
+    if (_isTimeQuery(message, language)) {
+      return "USER INTENT: Timing Question - The user is asking about optimal times for activities. Provide time-specific recommendations based on pollution patterns.";
+    }
+    
+    // 默认：环境健康建议请求
+    return "USER INTENT: General Environmental Health Advice - The user seems to be looking for general environmental health recommendations. Provide comprehensive advice based on current conditions.";
+  }
+
+  // 检测空气质量询问
+  bool _isAirQualityQuery(String message, String language) {
+    switch (language) {
+      case 'chinese':
+        return RegExp(r'(空气|质量|pm2\.5|pm10|污染|雾霾|指数|aqi)').hasMatch(message);
+      default:
+        return RegExp(r'(air quality|pollution|pm2\.5|pm10|aqi|smog|pollutant)').hasMatch(message);
+    }
+  }
+
+  // 检测外出活动询问
+  bool _isOutdoorActivityQuery(String message, String language) {
+    switch (language) {
+      case 'chinese':
+        return RegExp(r'(外出|户外|跑步|散步|骑车|运动|锻炼|出门)').hasMatch(message);
+      default:
+        return RegExp(r'(outdoor|outside|running|walking|cycling|exercise|go out)').hasMatch(message);
+    }
+  }
+
+  // 检测室内活动询问
+  bool _isIndoorActivityQuery(String message, String language) {
+    switch (language) {
+      case 'chinese':
+        return RegExp(r'(室内|开窗|通风|空调|净化器|在家)').hasMatch(message);
+      default:
+        return RegExp(r'(indoor|inside|window|ventilation|air purifier|at home)').hasMatch(message);
+    }
+  }
+
+  // 检测通勤询问
+  bool _isCommutingQuery(String message, String language) {
+    switch (language) {
+      case 'chinese':
+        return RegExp(r'(通勤|上班|路线|交通|地铁|公交|开车)').hasMatch(message);
+      default:
+        return RegExp(r'(commute|commuting|route|traffic|subway|bus|driving|travel)').hasMatch(message);
+    }
+  }
+
+  // 检测防护询问
+  bool _isProtectionQuery(String message, String language) {
+    switch (language) {
+      case 'chinese':
+        return RegExp(r'(口罩|防护|保护|预防|措施|建议)').hasMatch(message);
+      default:
+        return RegExp(r'(mask|protection|protect|prevent|measure|advice|safety)').hasMatch(message);
+    }
   }
 
   // 检测用户输入的语言
@@ -439,12 +562,12 @@ Respond appropriately in the same language and style as the user:''';
     return formatted;
   }
 
-  String _getSmartFallbackResponse(String userMessage, double? pm25, double? windSpeed, double? temperature) {
+  String _getSmartEnvironmentalFallback(String userMessage, double? pm25, double? windSpeed, double? temperature) {
     final language = _detectLanguage(userMessage);
     
     // 分析用户意图
     if (_isGreeting(userMessage.toLowerCase(), language)) {
-      return _formatGreetingResponse(language);
+      return _formatEnvironmentalGreetingResponse(language);
     }
     
     // 环境评估
@@ -453,18 +576,423 @@ Respond appropriately in the same language and style as the user:''';
     String windStatus = _getWindStatus(windSpeed);
     
     // 根据用户意图和语言生成回复
-    if (_isExerciseQuery(userMessage.toLowerCase(), language)) {
-      return _formatExerciseAdvice(pm25, temperature, windSpeed, airStatus, tempStatus, windStatus, language);
-    } else if (_isWeatherQuery(userMessage.toLowerCase(), language)) {
-      return _formatWeatherAdvice(pm25, temperature, windSpeed, airStatus, tempStatus, windStatus, language);
+    if (_isAirQualityQuery(userMessage.toLowerCase(), language)) {
+      return _formatAirQualityAdvice(pm25, airStatus, language);
+    } else if (_isOutdoorActivityQuery(userMessage.toLowerCase(), language)) {
+      return _formatOutdoorActivityAdvice(pm25, temperature, windSpeed, airStatus, tempStatus, windStatus, language);
+    } else if (_isIndoorActivityQuery(userMessage.toLowerCase(), language)) {
+      return _formatIndoorAdvice(pm25, airStatus, language);
+    } else if (_isCommutingQuery(userMessage.toLowerCase(), language)) {
+      return _formatCommutingAdvice(pm25, airStatus, language);
+    } else if (_isProtectionQuery(userMessage.toLowerCase(), language)) {
+      return _formatProtectionAdvice(pm25, airStatus, language);
     } else if (_isTimeQuery(userMessage.toLowerCase(), language)) {
-      return _formatTimeAdvice(airStatus, tempStatus, language);
-    } else if (_isHealthQuery(userMessage.toLowerCase(), language)) {
-      return _formatHealthAdvice(pm25, temperature, airStatus, tempStatus, language);
+      return _formatEnvironmentalTimeAdvice(airStatus, tempStatus, language);
     } else if (_isCasualChat(userMessage.toLowerCase(), language)) {
-      return _formatCasualResponse(language);
+      return _formatEnvironmentalCasualResponse(language);
     } else {
-      return _formatGeneralAdvice(pm25, temperature, airStatus, tempStatus, language);
+      return _formatGeneralEnvironmentalAdvice(pm25, temperature, airStatus, tempStatus, language);
+    }
+  }
+
+  // 环境健康问候回应
+  String _formatEnvironmentalGreetingResponse(String language) {
+    switch (language) {
+      case 'chinese':
+        return "你好！👋 我是你的AI环境健康助手，很高兴为你服务！\n\n"
+               "我可以根据实时环境数据帮助你做出明智的日常生活决策，减少环境暴露风险。\n\n"
+               "你可以问我关于:\n"
+               "• 今天的空气质量如何\n"
+               "• 什么时候适合外出\n"
+               "• 是否需要戴口罩\n"
+               "• 开窗通风的最佳时间\n\n"
+               "有什么想了解的吗？";
+      default:
+        return "Hello! 👋 I'm your AI Environmental Health Assistant, happy to help!\n\n"
+               "I can help you make informed daily decisions based on real-time environmental data to reduce exposure risks.\n\n"
+               "You can ask me about:\n"
+               "• Current air quality conditions\n"
+               "• Best times for outdoor activities\n"
+               "• When to wear masks\n"
+               "• Optimal window ventilation times\n\n"
+               "What would you like to know?";
+    }
+  }
+
+  // 空气质量建议
+  String _formatAirQualityAdvice(double? pm25, String airStatus, String language) {
+    if (language == 'chinese') {
+      String advice = "🌬️ 空气质量报告\n\n";
+      
+      if (pm25 != null) {
+        advice += "当前PM2.5: ${pm25.toStringAsFixed(1)} µg/m³\n";
+        
+        if (pm25 <= 15) {
+          advice += "状态: 优秀 ✅\n\n";
+          advice += "建议:\n";
+          advice += "• 适合所有户外活动\n";
+          advice += "• 可以开窗通风\n";
+          advice += "• 无需特殊防护措施";
+        } else if (pm25 <= 35) {
+          advice += "状态: 良好 🟡\n\n";
+          advice += "建议:\n";
+          advice += "• 大部分人可正常户外活动\n";
+          advice += "• 敏感人群适当减少户外时间\n";
+          advice += "• 可以短时间开窗通风";
+        } else if (pm25 <= 55) {
+          advice += "状态: 轻度污染 🟠\n\n";
+          advice += "建议:\n";
+          advice += "• 减少户外活动时间\n";
+          advice += "• 外出建议佩戴口罩\n";
+          advice += "• 避免开窗，使用空气净化器";
+        } else {
+          advice += "状态: 重度污染 🔴\n\n";
+          advice += "建议:\n";
+          advice += "• 尽量避免外出\n";
+          advice += "• 必须外出时佩戴N95口罩\n";
+          advice += "• 关闭门窗，开启空气净化器";
+        }
+      } else {
+        advice += "No data available, please try again later";
+      }
+      
+      return advice;
+    } else {
+      String advice = "🌬️ AIR QUALITY REPORT\n\n";
+      
+      if (pm25 != null) {
+        advice += "Current PM2.5: ${pm25.toStringAsFixed(1)} µg/m³\n";
+        
+        if (pm25 <= 15) {
+          advice += "Status: Excellent ✅\n\n";
+          advice += "Recommendations:\n";
+          advice += "• All outdoor activities suitable\n";
+          advice += "• Safe to open windows\n";
+          advice += "• No special protection needed";
+        } else if (pm25 <= 35) {
+          advice += "Status: Good 🟡\n\n";
+          advice += "Recommendations:\n";
+          advice += "• Most people can do outdoor activities\n";
+          advice += "• Sensitive groups reduce outdoor time\n";
+          advice += "• Brief window ventilation okay";
+        } else if (pm25 <= 55) {
+          advice += "Status: Moderate pollution 🟠\n\n";
+          advice += "Recommendations:\n";
+          advice += "• Reduce outdoor activity time\n";
+          advice += "• Consider wearing masks outdoors\n";
+          advice += "• Avoid opening windows, use air purifier";
+        } else {
+          advice += "Status: Heavy pollution 🔴\n\n";
+          advice += "Recommendations:\n";
+          advice += "• Avoid going outside if possible\n";
+          advice += "• Wear N95 mask if must go out\n";
+          advice += "• Keep windows closed, use air purifier";
+        }
+      } else {
+        advice += "No data available, please try again later";
+      }
+      
+      return advice;
+    }
+  }
+
+  // 户外活动建议
+  String _formatOutdoorActivityAdvice(double? pm25, double? temp, double? wind, String airStatus, String tempStatus, String windStatus, String language) {
+    if (language == 'chinese') {
+      String advice = "🚶‍♂️ 户外活动建议\n\n";
+      
+      if (pm25 != null) {
+        advice += "空气质量: ${pm25.toStringAsFixed(1)} µg/m³ (${_translateStatus(airStatus, language)})\n";
+      }
+      if (temp != null) {
+        advice += "温度: ${temp.toStringAsFixed(1)}°C (${_translateStatus(tempStatus, language)})\n\n";
+      }
+      
+      if (airStatus == "poor" || (pm25 != null && pm25 > 35)) {
+        advice += "建议: 减少户外活动\n\n";
+        advice += "• 尽量选择室内活动\n";
+        advice += "• 如需外出: 佩戴口罩，缩短时间\n";
+        advice += "• 避开交通繁忙区域\n";
+        advice += "• 老人和儿童特别注意";
+      } else {
+        advice += "建议: 适合户外活动\n\n";
+        advice += "• 散步、跑步、骑行都不错\n";
+        advice += "• 最佳时间: 早上或傍晚\n";
+        advice += "• 选择公园等绿化区域\n";
+        if (tempStatus == "cold") {
+          advice += "• 注意保暖";
+        } else if (tempStatus == "warm") {
+          advice += "• 注意防晒和补水";
+        }
+      }
+      return advice;
+    } else {
+      String advice = "🚶‍♂️ OUTDOOR ACTIVITY ADVICE\n\n";
+      
+      if (pm25 != null) {
+        advice += "Air Quality: ${pm25.toStringAsFixed(1)} µg/m³ ($airStatus)\n";
+      }
+      if (temp != null) {
+        advice += "Temperature: ${temp.toStringAsFixed(1)}°C ($tempStatus)\n\n";
+      }
+      
+      if (airStatus == "poor" || (pm25 != null && pm25 > 35)) {
+        advice += "RECOMMENDATION: Limit outdoor activities\n\n";
+        advice += "• Prefer indoor activities\n";
+        advice += "• If going out: wear mask, limit time\n";
+        advice += "• Avoid busy traffic areas\n";
+        advice += "• Extra caution for elderly and children";
+      } else {
+        advice += "RECOMMENDATION: Good for outdoor activities\n\n";
+        advice += "• Walking, running, cycling all suitable\n";
+        advice += "• Best times: morning or evening\n";
+        advice += "• Choose parks and green areas\n";
+        if (tempStatus == "cold") {
+          advice += "• Dress warmly";
+        } else if (tempStatus == "warm") {
+          advice += "• Stay hydrated and use sun protection";
+        }
+      }
+      return advice;
+    }
+  }
+
+  // 室内建议
+  String _formatIndoorAdvice(double? pm25, String airStatus, String language) {
+    if (language == 'chinese') {
+      String advice = "🏠 室内环境建议\n\n";
+      
+      if (pm25 != null) {
+        if (pm25 <= 15) {
+          advice += "空气质量优秀，建议:\n";
+          advice += "• 可以开窗通风30分钟\n";
+          advice += "• 早晨和傍晚通风效果最好\n";
+          advice += "• 暂停空气净化器节能";
+        } else if (pm25 <= 35) {
+          advice += "空气质量良好，建议:\n";
+          advice += "• 可以短时间开窗通风\n";
+          advice += "• 避开交通高峰期\n";
+          advice += "• 适度使用空气净化器";
+        } else {
+          advice += "空气质量较差，建议:\n";
+          advice += "• 关闭门窗\n";
+          advice += "• 开启空气净化器\n";
+          advice += "• 增加室内绿植\n";
+          advice += "• 使用加湿器保持湿度";
+        }
+      }
+      
+      return advice;
+    } else {
+      String advice = "🏠 INDOOR ENVIRONMENT ADVICE\n\n";
+      
+      if (pm25 != null) {
+        if (pm25 <= 15) {
+          advice += "Excellent air quality, recommendations:\n";
+          advice += "• Safe to open windows for 30 minutes\n";
+          advice += "• Best ventilation: morning and evening\n";
+          advice += "• Can pause air purifier to save energy";
+        } else if (pm25 <= 35) {
+          advice += "Good air quality, recommendations:\n";
+          advice += "• Brief window ventilation okay\n";
+          advice += "• Avoid rush hour periods\n";
+          advice += "• Use air purifier moderately";
+        } else {
+          advice += "Poor air quality, recommendations:\n";
+          advice += "• Keep windows and doors closed\n";
+          advice += "• Run air purifier continuously\n";
+          advice += "• Add indoor plants\n";
+          advice += "• Use humidifier to maintain humidity";
+        }
+      }
+      
+      return advice;
+    }
+  }
+
+  // 通勤建议
+  String _formatCommutingAdvice(double? pm25, String airStatus, String language) {
+    if (language == 'chinese') {
+      String advice = "🚗 通勤建议\n\n";
+      
+      if (pm25 != null) {
+        if (pm25 > 35) {
+          advice += "空气质量较差，建议:\n";
+          advice += "• 佩戴N95口罩\n";
+          advice += "• 选择地铁等密闭交通工具\n";
+          advice += "• 避免骑行和步行\n";
+          advice += "• 开车时关闭外循环";
+        } else {
+          advice += "空气质量可接受，建议:\n";
+          advice += "• 可以选择步行或骑行\n";
+          advice += "• 避开交通繁忙路段\n";
+          advice += "• 选择绿化较好的路线\n";
+          advice += "• 敏感人群仍建议佩戴口罩";
+        }
+      }
+      
+      return advice;
+    } else {
+      String advice = "🚗 COMMUTING ADVICE\n\n";
+      
+      if (pm25 != null) {
+        if (pm25 > 35) {
+          advice += "Poor air quality, recommendations:\n";
+          advice += "• Wear N95 mask\n";
+          advice += "• Choose enclosed transport (subway)\n";
+          advice += "• Avoid cycling and walking\n";
+          advice += "• Use car recirculation mode";
+        } else {
+          advice += "Acceptable air quality, recommendations:\n";
+          advice += "• Walking or cycling is okay\n";
+          advice += "• Avoid heavy traffic areas\n";
+          advice += "• Choose routes with more greenery\n";
+          advice += "• Sensitive individuals still wear masks";
+        }
+      }
+      
+      return advice;
+    }
+  }
+
+  // 防护建议
+  String _formatProtectionAdvice(double? pm25, String airStatus, String language) {
+    if (language == 'chinese') {
+      String advice = "🛡️ 健康防护建议\n\n";
+      
+      if (pm25 != null) {
+        if (pm25 > 55) {
+          advice += "重度污染，必要防护:\n";
+          advice += "• 必须佩戴N95或更高级别口罩\n";
+          advice += "• 尽量避免外出\n";
+          advice += "• 室内开启空气净化器\n";
+          advice += "• 多喝水，清淡饮食";
+        } else if (pm25 > 35) {
+          advice += "中度污染，建议防护:\n";
+          advice += "• 外出佩戴医用口罩\n";
+          advice += "• 减少户外活动时间\n";
+          advice += "• 回家后清洗面部和手部\n";
+          advice += "• 多吃富含维生素的食物";
+        } else {
+          advice += "轻度污染，基础防护:\n";
+          advice += "• 敏感人群佩戴口罩\n";
+          advice += "• 适当补充水分\n";
+          advice += "• 保持良好作息\n";
+          advice += "• 增强身体免疫力";
+        }
+      }
+      
+      return advice;
+    } else {
+      String advice = "🛡️ HEALTH PROTECTION ADVICE\n\n";
+      
+      if (pm25 != null) {
+        if (pm25 > 55) {
+          advice += "Heavy pollution, essential protection:\n";
+          advice += "• Must wear N95 or higher grade mask\n";
+          advice += "• Avoid going outside if possible\n";
+          advice += "• Run air purifier indoors\n";
+          advice += "• Drink more water, eat light meals";
+        } else if (pm25 > 35) {
+          advice += "Moderate pollution, recommended protection:\n";
+          advice += "• Wear medical mask when outside\n";
+          advice += "• Reduce outdoor activity time\n";
+          advice += "• Wash face and hands after returning home\n";
+          advice += "• Eat vitamin-rich foods";
+        } else {
+          advice += "Light pollution, basic protection:\n";
+          advice += "• Sensitive individuals wear masks\n";
+          advice += "• Stay adequately hydrated\n";
+          advice += "• Maintain good sleep schedule\n";
+          advice += "• Boost immune system";
+        }
+      }
+      
+      return advice;
+    }
+  }
+
+  // 环境时间建议
+  String _formatEnvironmentalTimeAdvice(String airStatus, String tempStatus, String language) {
+    if (language == 'chinese') {
+      return "⏰ 最佳活动时间\n\n"
+             "推荐时段:\n"
+             "• 清晨: 6-8点 (空气相对清洁)\n"
+             "• 傍晚: 6-8点 (污染物扩散)\n"
+             "• 雨后: 空气质量最佳\n\n"
+             "避免时段:\n"
+             "• 中午: 11点-下午3点 (光化学污染)\n"
+             "• 高峰期: 早7-9点，晚5-7点 (交通污染)";
+    } else {
+      return "⏰ OPTIMAL ACTIVITY TIMES\n\n"
+             "BEST WINDOWS:\n"
+             "• Early morning: 6-8 AM (relatively clean air)\n"
+             "• Evening: 6-8 PM (pollutant dispersion)\n"
+             "• After rain: best air quality\n\n"
+             "AVOID:\n"
+             "• Midday: 11 AM-3 PM (photochemical pollution)\n"
+             "• Rush hours: 7-9 AM, 5-7 PM (traffic pollution)";
+    }
+  }
+
+  // 环境闲聊回应
+  String _formatEnvironmentalCasualResponse(String language) {
+    switch (language) {
+      case 'chinese':
+        return "😊 很高兴和你聊天！\n\n"
+               "我是专门帮助你应对环境健康挑战的AI助手。基于当前的环境数据，我可以为你的日常生活提供个性化建议。\n\n"
+               "比如你可以问我:\n"
+               "• \"今天空气质量怎么样？\"\n"
+               "• \"什么时候适合开窗通风？\"\n"
+               "• \"需要戴口罩吗？\"\n\n"
+               "有什么想了解的吗？";
+      default:
+        return "😊 Nice chatting with you!\n\n"
+               "I'm an AI assistant specialized in helping you navigate environmental health challenges. Based on current environmental data, I can provide personalized advice for your daily life.\n\n"
+               "You could ask me things like:\n"
+               "• \"How's the air quality today?\"\n"
+               "• \"When should I open windows?\"\n"
+               "• \"Do I need to wear a mask?\"\n\n"
+               "Is there anything specific you'd like to know?";
+    }
+  }
+
+  // 综合环境建议
+  String _formatGeneralEnvironmentalAdvice(double? pm25, double? temp, String airStatus, String tempStatus, String language) {
+    if (language == 'chinese') {
+      String advice = "🌍 环境健康助手就绪\n\n";
+      
+      if (pm25 != null) {
+        advice += "当前空气质量: ${pm25.toStringAsFixed(1)} µg/m³ (${_translateStatus(airStatus, language)})\n";
+      }
+      if (temp != null) {
+        advice += "温度: ${temp.toStringAsFixed(1)}°C (${_translateStatus(tempStatus, language)})\n\n";
+      }
+      
+      advice += "询问我关于:\n";
+      advice += "• 外出活动的最佳时间\n";
+      advice += "• 室内通风和空气净化\n";
+      advice += "• 健康防护措施\n";
+      advice += "• 通勤路线建议";
+      
+      return advice;
+    } else {
+      String advice = "🌍 ENVIRONMENTAL HEALTH ASSISTANT READY\n\n";
+      
+      if (pm25 != null) {
+        advice += "Current air quality: ${pm25.toStringAsFixed(1)} µg/m³ ($airStatus)\n";
+      }
+      if (temp != null) {
+        advice += "Temperature: ${temp.toStringAsFixed(1)}°C ($tempStatus)\n\n";
+      }
+      
+      advice += "ASK ME ABOUT:\n";
+      advice += "• Best times for outdoor activities\n";
+      advice += "• Indoor ventilation and air purification\n";
+      advice += "• Health protection measures\n";
+      advice += "• Commuting route suggestions";
+      
+      return advice;
     }
   }
 

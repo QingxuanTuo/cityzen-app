@@ -326,13 +326,13 @@ class AirQualityLegend extends StatelessWidget {
   List<String> _getLabels(String pollutant) {
     switch (pollutant) {
       case 'PM2.5':
-        return ['优 (0-5)', '良 (5-15)', '轻度 (15-25)', '中度 (25-50)', '重度 (50-75)', '严重 (75-100)', '爆表 (100+)'];
+        return ['Good (0-5)', 'Fair (5-15)', 'Moderate (15-25)', 'Poor (25-50)', 'Very Poor (50-75)', 'Extremely Poor (75-100)', 'Hazardous (100+)'];
       case 'PM10':
-        return ['优 (0-10)', '良 (10-20)', '轻度 (20-40)', '中度 (40-80)', '重度 (80-120)', '严重 (120-200)', '爆表 (200+)'];
+        return ['Good (0-10)', 'Fair (10-20)', 'Moderate (20-40)', 'Poor (40-80)', 'Very Poor (80-120)', 'Extremely Poor (120-200)', 'Hazardous (200+)'];
       case 'O3':
-        return ['优 (0-60)', '良 (60-120)', '轻度 (120-180)', '中度 (180-240)', '重度 (240-300)', '严重 (300-400)', '爆表 (400+)'];
+        return ['Good (0-60)', 'Fair (60-120)', 'Moderate (120-180)', 'Poor (180-240)', 'Very Poor (240-300)', 'Extremely Poor (300-400)', 'Hazardous (400+)'];
       default:
-        return ['优', '良', '轻度污染', '中度污染', '重度污染', '严重污染', '爆表'];
+        return ['Good', 'Fair', 'Moderate', 'Poor', 'Very Poor', 'Extremely Poor', 'Hazardous'];
     }
   }
   
@@ -366,19 +366,19 @@ class StationDetailDialog extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('数据源: ${station.source}'),
+          Text('Data Source: ${station.source}'),
           const SizedBox(height: 8),
           if (station.pm25 != null)
             _buildDataRow('PM2.5', station.pm25!, 'µg/m³'),
           if (station.pm10 != null)
             _buildDataRow('PM10', station.pm10!, 'µg/m³'),
           if (station.ozone != null)
-            _buildDataRow('臭氧', station.ozone!, 'µg/m³'),
+            _buildDataRow('Ozone', station.ozone!, 'µg/m³'),
           if (station.aqi != null)
             _buildDataRow('AQI', station.aqi!, ''),
           const SizedBox(height: 8),
           Text(
-            '更新时间: ${_formatDateTime(station.lastUpdated)}',
+            'Last Updated: ${_formatDateTime(station.lastUpdated)}',
             style: const TextStyle(fontSize: 12, color: Colors.grey),
           ),
         ],
@@ -386,7 +386,7 @@ class StationDetailDialog extends StatelessWidget {
       actions: [
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
-          child: const Text('关闭'),
+          child: const Text('Close'),
         ),
       ],
     );

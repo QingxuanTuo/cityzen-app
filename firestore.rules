@@ -1,0 +1,116 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // 用户主文档 - 只允许用户访问自己的数据
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+      
+      // 管理员可以读取所有用户数据（可选）
+      allow read: if request.auth != null && 
+                     exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+                     get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+    
+    // 健康档案 - 只允许用户访问自己的健康数据
+    match /health_profiles/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+      
+      // 验证数据完整性
+      allow create: if request.auth != null && 
+                       request.auth.uid == userId &&
+                       request.resource.data.userId == userId &&
+                       request.resource.data.keys().hasAll(['userId', 'createdAt', 'updatedAt']);
+      
+      allow update: if request.auth != null && 
+                       request.auth.uid == userId &&
+                       resource.data.userId == userId &&
+                       request.resource.data.userId == userId;
+    }
+    
+    // 收藏位置 - 只允许用户访问自己的收藏
+    match /favorite_locations/{locationId} {
+      allow read, write: if request.auth != null && 
+                            request.auth.uid == resource.data.userId;
+      
+      allow create: if request.auth != null && 
+                       request.auth.uid == request.resource.data.userId;
+    }
+    
+    // 用户设置 - 只允许用户访问自己的设置
+    match /user_settings/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+    
+    // 会话记录 - 只允许用户访问自己的会话
+    match /sessions/{sessionId} {
+      allow read, write: if request.auth != null && 
+                            request.auth.uid == resource.data.userId;
+      
+      allow create: if request.auth != null && 
+                       request.auth.uid == request.resource.data.userId &&
+                       request.resource.data.keys().hasAll(['userId', 'createdAt']);
+      
+      // 验证会话数据格式
+      allow create, update: if request.auth != null && 
+                               request.resource.data.userId is string &&
+                               request.resource.data.createdAt != null;
+    }
+    
+    // 预约记录（可选 - 用于高分展示）
+    match /appointments/{appointmentId} {
+      allow read: if request.auth != null && 
+                     (request.auth.uid == resource.data.userId ||
+                      request.auth.uid == resource.data.therapistId);
+      
+      allow create: if request.auth != null && 
+                       request.auth.uid == request.resource.data.userId;
+      
+      allow update: if request.auth != null && 
+                       (request.auth.uid == resource.data.userId ||
+                        request.auth.uid == resource.data.therapistId);
+      
+      // 管理员可以管理所有预约
+      allow read, write: if request.auth != null && 
+                            exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+                            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+    
+    // 环境数据 - 只读（公共数据）
+    match /environment_data/{dataId} {
+      allow read: if request.auth != null;
+      allow write: if false; // 只能通过Cloud Functions写入
+    }
+    
+    // 健康检查集合 - 用于测试连接
+    match /_health_check/{document} {
+      allow read: if request.auth != null;
+    }
+    
+    // 测试集合 - 开发时使用
+    match /_test/{document} {
+      allow read, write: if request.auth != null;
+    }
+    
+    // 辅助函数
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return request.auth.uid == userId;
+    }
+    
+    function isAdmin() {
+      return isAuthenticated() && 
+             exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+    }
+    
+    function isValidUserData() {
+      return request.resource.data.keys().hasAll(['userId', 'createdAt']) &&
+             request.resource.data.userId is string;
+    }
+  }
+}

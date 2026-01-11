@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'package:http/http.dart' as http;
 import 'package:latlong2/latlong.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_map/flutter_map.dart';
 
 // 增强的空气质量服务
 class EnhancedAirQualityService {
@@ -17,13 +18,13 @@ class EnhancedAirQualityService {
     final stations = <AirQualityStation>[];
     
     try {
-      // 1. 获取OpenAQ监测站数据
+      // 1. 获取OpenAQ监测站数据 - 增加限制数量
       final openAQStations = await _getOpenAQStations(location, radiusKm);
       stations.addAll(openAQStations);
       
-      // 2. 获取WAQI监测站数据
-      final waqiStations = await _getWAQIStations(location, radiusKm);
-      stations.addAll(waqiStations);
+      // 2. 获取Open-Meteo空气质量数据作为补充
+      final openMeteoStations = await _getOpenMeteoAirQualityStations(location, radiusKm);
+      stations.addAll(openMeteoStations);
       
       // 3. 数据去重和质量控制
       return _deduplicateAndValidate(stations);
@@ -109,7 +110,7 @@ class EnhancedAirQualityService {
     );
   }
   
-  // OpenAQ API调用
+  // OpenAQ API调用 - 优化获取更多监测站
   Future<List<AirQualityStation>> _getOpenAQStations(
     LatLng location, 
     double radiusKm
@@ -118,13 +119,17 @@ class EnhancedAirQualityService {
       '$openAQBaseUrl/locations'
       '?coordinates=${location.latitude},${location.longitude}'
       '&radius=${radiusKm * 1000}' // 转换为米
-      '&limit=50'
+      '&limit=100' // 增加到100个监测站
       '&order_by=distance'
+      '&has_geo=true' // 确保有地理坐标
     );
     
     try {
-      final response = await http.get(uri).timeout(const Duration(seconds: 10));
-      if (response.statusCode != 200) return [];
+      final response = await http.get(uri).timeout(const Duration(seconds: 15));
+      if (response.statusCode != 200) {
+        debugPrint('OpenAQ API returned status: ${response.statusCode}');
+        return [];
+      }
       
       final data = jsonDecode(response.body);
       final results = data['results'] as List?;
@@ -136,6 +141,7 @@ class EnhancedAirQualityService {
         if (station != null) stations.add(station);
       }
       
+      debugPrint('OpenAQ returned ${stations.length} stations');
       return stations;
     } catch (e) {
       debugPrint('OpenAQ API error: $e');
@@ -177,6 +183,90 @@ class EnhancedAirQualityService {
     }
   }
   
+  // 使用Open-Meteo API获取网格化空气质量数据
+  Future<List<AirQualityStation>> _getOpenMeteoAirQualityStations(
+    LatLng location, 
+    double radiusKm
+  ) async {
+    final stations = <AirQualityStation>[];
+    
+    // 在米兰周围创建网格点来获取空气质量数据
+    final gridSize = 0.05; // 约5km间隔
+    final steps = (radiusKm / 5.5).round(); // 根据半径计算步数
+    
+    for (int i = -steps; i <= steps; i++) {
+      for (int j = -steps; j <= steps; j++) {
+        final lat = location.latitude + (i * gridSize);
+        final lon = location.longitude + (j * gridSize);
+        final gridPoint = LatLng(lat, lon);
+        
+        // 检查是否在指定半径内
+        final distance = _calculateDistance(location, gridPoint);
+        if (distance > radiusKm) continue;
+        
+        try {
+          final station = await _fetchOpenMeteoAirQuality(gridPoint, i, j);
+          if (station != null) stations.add(station);
+        } catch (e) {
+          // 忽略单个点的错误，继续处理其他点
+          continue;
+        }
+      }
+    }
+    
+    debugPrint('Open-Meteo returned ${stations.length} grid points');
+    return stations;
+  }
+  
+  // 获取单个点的Open-Meteo空气质量数据
+  Future<AirQualityStation?> _fetchOpenMeteoAirQuality(LatLng point, int gridX, int gridY) async {
+    final uri = Uri.parse(
+      'https://air-quality-api.open-meteo.com/v1/air-quality'
+      '?latitude=${point.latitude}&longitude=${point.longitude}'
+      '&current=pm10,pm2_5,ozone'
+      '&timezone=auto'
+    );
+    
+    try {
+      final response = await http.get(uri).timeout(const Duration(seconds: 10));
+      if (response.statusCode != 200) return null;
+      
+      final data = jsonDecode(response.body);
+      final current = data['current'] as Map<String, dynamic>?;
+      if (current == null) return null;
+      
+      final pm25 = (current['pm2_5'] as num?)?.toDouble();
+      final pm10 = (current['pm10'] as num?)?.toDouble();
+      final ozone = (current['ozone'] as num?)?.toDouble();
+      
+      // 只有当至少有一个有效数据时才创建站点
+      if (pm25 == null && pm10 == null && ozone == null) return null;
+      
+      return AirQualityStation(
+        id: 'openmeteo_${gridX}_${gridY}',
+        name: 'Grid Point (${point.latitude.toStringAsFixed(2)}, ${point.longitude.toStringAsFixed(2)})',
+        location: point,
+        pm25: pm25,
+        pm10: pm10,
+        ozone: ozone,
+        aqi: pm25 != null ? _calculateSimpleAQI(pm25).toDouble() : null,
+        source: 'Open-Meteo',
+        lastUpdated: DateTime.now(),
+      );
+    } catch (e) {
+      return null;
+    }
+  }
+  
+  // 简单的AQI计算
+  int _calculateSimpleAQI(double pm25) {
+    if (pm25 <= 12) return (pm25 / 12 * 50).round();
+    if (pm25 <= 35.4) return (50 + (pm25 - 12) / 23.4 * 50).round();
+    if (pm25 <= 55.4) return (100 + (pm25 - 35.4) / 20 * 50).round();
+    if (pm25 <= 150.4) return (150 + (pm25 - 55.4) / 95 * 50).round();
+    return 200;
+  }
+
   // 反距离权重插值算法
   double? _interpolateIDW(
     List<AirQualityStation> stations,
