@@ -552,7 +552,8 @@ class _HomePageState extends State<HomePage> {
                     ),
                     const SizedBox(width: 8),
                     Text(
-                      AppLocalizations.of(context)?.milanItaly ?? 'Milan, Italy',
+                      AppLocalizations.of(context)?.milanItaly ??
+                          'Milan, Italy',
                       style: const TextStyle(
                         fontWeight: FontWeight.w800,
                         fontSize: 14,
@@ -581,13 +582,22 @@ class _HomePageState extends State<HomePage> {
                 ),
               )
             : r == null
-            ? Center(child: Text(AppLocalizations.of(context)?.noDataAvailable ?? 'No data available'))
+            ? Center(
+                child: Text(
+                  AppLocalizations.of(context)?.noDataAvailable ??
+                      'No data available',
+                ),
+              )
             : Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   // ✅ 顶部 Header：定位 + 问候 + 日期 + 时间（参考图布局）
                   const SizedBox(height: 0),
-                  _HeaderTop(city: AppLocalizations.of(context)?.milanItaly ?? 'Milan, Italy'),
+                  _HeaderTop(
+                    city:
+                        AppLocalizations.of(context)?.milanItaly ??
+                        'Milan, Italy',
+                  ),
                   const SizedBox(height: 14),
 
                   /// 🌦️ 环境评估卡片
@@ -677,7 +687,11 @@ class _HomePageState extends State<HomePage> {
                                   children: [
                                     Expanded(
                                       child: _MiniStatCard(
-                                        title: AppLocalizations.of(context)?.wind ?? 'Wind',
+                                        title:
+                                            AppLocalizations.of(
+                                              context,
+                                            )?.wind ??
+                                            'Wind',
                                         value: r.windKmh == null
                                             ? '—'
                                             : r.windKmh!.toStringAsFixed(1),
@@ -687,7 +701,11 @@ class _HomePageState extends State<HomePage> {
                                     const SizedBox(width: 10),
                                     Expanded(
                                       child: _MiniStatCard(
-                                        title: AppLocalizations.of(context)?.humidity ?? 'Humidity',
+                                        title:
+                                            AppLocalizations.of(
+                                              context,
+                                            )?.humidity ??
+                                            'Humidity',
                                         value: r.humidity == null
                                             ? '—'
                                             : r.humidity!.toStringAsFixed(0),
@@ -701,7 +719,11 @@ class _HomePageState extends State<HomePage> {
                                         builder: (context) {
                                           final pmTag = _airQualityTag(r.pm25);
                                           return _MiniStatCard(
-                                            title: AppLocalizations.of(context)?.pm25 ?? 'PM2.5',
+                                            title:
+                                                AppLocalizations.of(
+                                                  context,
+                                                )?.pm25 ??
+                                                'PM2.5',
                                             value: r.pm25 == null
                                                 ? '—'
                                                 : r.pm25!.toStringAsFixed(1),
@@ -1383,7 +1405,7 @@ class _ActivityPageState extends State<ActivityPage> {
 
     // 监听环境数据变化
     _envManager.addListener(_onEnvironmentDataChanged);
-    
+
     // 监听AI配置变化，确保配置保存后页面会重建
     _aiConfigManager.addListener(_onAIConfigChanged);
 
@@ -1422,7 +1444,9 @@ class _ActivityPageState extends State<ActivityPage> {
     final l10n = AppLocalizations.of(context);
     _chatMessages.add(
       ChatMessage(
-        text: l10n?.aiWelcomeMessage ?? "Hello! I'm your AI Environmental Health Assistant. I can provide daily life recommendations based on real-time environmental data to help you reduce environmental exposure risks. What would you like to know?",
+        text:
+            l10n?.aiWelcomeMessage ??
+            "Hello! I'm your AI Environmental Health Assistant. I can provide daily life recommendations based on real-time environmental data to help you reduce environmental exposure risks. What would you like to know?",
         isUser: false,
         timestamp: DateTime.now(),
       ),
@@ -1440,7 +1464,8 @@ class _ActivityPageState extends State<ActivityPage> {
         );
         _chatMessages.add(
           ChatMessage(
-            text: "Please configure your AI API key in Settings to use the AI assistant. Go to Settings > AI Configuration to enter your Gemini API key.",
+            text:
+                "Please configure your AI API key in Settings to use the AI assistant. Go to Settings > AI Configuration to enter your Gemini API key.",
             isUser: false,
             timestamp: DateTime.now(),
           ),
@@ -1530,24 +1555,18 @@ class _ActivityPageState extends State<ActivityPage> {
     // 直接显示聊天界面和快速问题卡片，不再检查配置状态
     // API配置在Settings页面完成，发送消息时再检查配置
     final isTablet = ScreenSize.isTablet(context);
-    
+
     // 使用LayoutBuilder获取可用高度，确保不会溢出
     return LayoutBuilder(
       builder: (context, constraints) {
         // 在非手机设备上，快速问题卡片使用固定的小高度
         final screenWidth = MediaQuery.of(context).size.width;
         final useCompactLayout = screenWidth >= 600;
-        
+
         return Column(
           children: [
-            // Quick questions cards - 在非手机设备上使用固定的小高度
-            if (useCompactLayout)
-              SizedBox(
-                height: 80, // 减小到80px，因为现在只有一行卡片
-                child: _buildQuickQuestionCards(),
-              )
-            else
-              _buildQuickQuestionCards(),
+            // Quick questions cards
+            _buildQuickQuestionCards(),
             Expanded(
               child: Column(
                 children: [
@@ -1565,59 +1584,65 @@ class _ActivityPageState extends State<ActivityPage> {
                       },
                     ),
                   ),
-              Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.1),
-                      blurRadius: 10,
-                      offset: const Offset(0, -2),
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.1),
+                          blurRadius: 10,
+                          offset: const Offset(0, -2),
+                        ),
+                      ],
                     ),
-                  ],
-                ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _chatController,
-                        decoration: InputDecoration(
-                          hintText: AppLocalizations.of(context)?.askAboutEnvironmentalHealth ?? 'Ask about environmental health...',
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(25),
-                          ),
-                          contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 16,
-                            vertical: 12,
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: _chatController,
+                            decoration: InputDecoration(
+                              hintText:
+                                  AppLocalizations.of(
+                                    context,
+                                  )?.askAboutEnvironmentalHealth ??
+                                  'Ask about environmental health...',
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(25),
+                              ),
+                              contentPadding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 12,
+                              ),
+                            ),
+                            onSubmitted: _isAILoading ? null : _sendChatMessage,
+                            enabled: !_isAILoading,
+                            maxLines: null,
                           ),
                         ),
-                        onSubmitted: _isAILoading ? null : _sendChatMessage,
-                        enabled: !_isAILoading,
-                        maxLines: null,
-                      ),
+                        const SizedBox(width: 8),
+                        FloatingActionButton(
+                          mini: true,
+                          onPressed: _isAILoading
+                              ? null
+                              : () => _sendChatMessage(_chatController.text),
+                          child: _isAILoading
+                              ? const SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Icon(Icons.send),
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 8),
-                    FloatingActionButton(
-                      mini: true,
-                      onPressed: _isAILoading
-                          ? null
-                          : () => _sendChatMessage(_chatController.text),
-                      child: _isAILoading
-                          ? const SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.send),
-                    ),
-                  ],
-                ),
+                  ),
+                ],
               ),
-            ],
-          ),
-        ),
-      ],
+            ),
+          ],
         );
       },
     );
@@ -1625,34 +1650,42 @@ class _ActivityPageState extends State<ActivityPage> {
 
   Widget _buildQuickQuestionCards() {
     final l10n = AppLocalizations.of(context);
-    
+
     // 强制判断：只要不是手机（宽度>=600），就用紧凑布局
     final screenWidth = MediaQuery.of(context).size.width;
     final useCompactLayout = screenWidth >= 600;
-    
+
     final quickQuestions = [
       {
         'icon': Icons.air,
         'title': l10n?.airQuality ?? 'Air Quality',
-        'question': l10n?.whatIsCurrentAirQuality ?? 'What is the current air quality like?',
+        'question':
+            l10n?.whatIsCurrentAirQuality ??
+            'What is the current air quality like?',
         'color': Colors.blue,
       },
       {
         'icon': Icons.directions_walk,
         'title': l10n?.outdoorActivity ?? 'Outdoor Activity',
-        'question': l10n?.isItSafeToExerciseOutdoors ?? 'Is it safe to exercise outdoors today?',
+        'question':
+            l10n?.isItSafeToExerciseOutdoors ??
+            'Is it safe to exercise outdoors today?',
         'color': Colors.green,
       },
       {
         'icon': Icons.health_and_safety,
         'title': l10n?.healthTips ?? 'Health Tips',
-        'question': l10n?.giveMeHealthRecommendations ?? 'Give me health recommendations for today',
+        'question':
+            l10n?.giveMeHealthRecommendations ??
+            'Give me health recommendations for today',
         'color': Colors.orange,
       },
       {
         'icon': Icons.warning,
         'title': l10n?.precautions ?? 'Precautions',
-        'question': l10n?.whatPrecautionsShouldITake ?? 'What precautions should I take today?',
+        'question':
+            l10n?.whatPrecautionsShouldITake ??
+            'What precautions should I take today?',
         'color': Colors.red,
       },
     ];
@@ -1665,38 +1698,20 @@ class _ActivityPageState extends State<ActivityPage> {
         final crossAxisCount = useCompactLayout ? 4 : 2;
         final aspectRatio = useCompactLayout ? 3.5 : 1.4;
         final spacing = useCompactLayout ? 6.0 : 8.0;
-        
-        // 计算GridView高度 - 在非手机设备上严格控制高度
-        double gridHeight;
-        double? containerHeight;
-        
-        if (useCompactLayout) {
-          // 平板/桌面上：一行4个卡片，固定高度
-          // 假设可用宽度是800px（ResponsiveContainer maxWidth）
-          // 每个卡片宽度 ≈ (800 - 32 - 18) / 4 = 187.5px
-          // 卡片高度 = 187.5 / 3.5 = 53.6px
-          // 只有一行，所以gridHeight = 53.6px ≈ 54px
-          containerHeight = 80.0; // 减小总高度到80px
-          gridHeight = 54.0; // 一行卡片高度
-        } else {
-          // 手机上：计算实际高度
-          final screenWidth = constraints.maxWidth;
-          final itemWidth = (screenWidth - 32 - spacing) / 2;
-          final itemHeight = itemWidth / aspectRatio;
-          gridHeight = (itemHeight * 2) + spacing;
-          containerHeight = null; // 手机不需要限制高度
-        }
-        
+
         return Container(
-          height: containerHeight, // 在平板上必须限制Container总高度
-          padding: EdgeInsets.fromLTRB(16, isTablet ? 4 : 12, 16, isTablet ? 4 : 12),
+          padding: EdgeInsets.fromLTRB(
+            16,
+            useCompactLayout ? 4 : 12,
+            16,
+            useCompactLayout ? 4 : 12,
+          ),
           decoration: BoxDecoration(
             color: Colors.white,
             border: Border(
               bottom: BorderSide(color: Colors.grey.withOpacity(0.2), width: 1),
             ),
           ),
-          clipBehavior: Clip.hardEdge, // 强制裁剪溢出内容
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
@@ -1712,29 +1727,26 @@ class _ActivityPageState extends State<ActivityPage> {
                   ),
                 ),
               ),
-              SizedBox(
-                height: gridHeight,
-                child: GridView.builder(
-                  physics: const NeverScrollableScrollPhysics(),
-                  shrinkWrap: true,
-                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: crossAxisCount,
-                    crossAxisSpacing: spacing,
-                    mainAxisSpacing: spacing,
-                    childAspectRatio: aspectRatio,
-                  ),
-                  itemCount: quickQuestions.length,
-                  itemBuilder: (context, index) {
-                    final item = quickQuestions[index];
-                    return _buildQuickQuestionCard(
-                      icon: item['icon'] as IconData,
-                      title: item['title'] as String,
-                      question: item['question'] as String,
-                      color: item['color'] as Color,
-                      isTablet: useCompactLayout,
-                    );
-                  },
+              GridView.builder(
+                shrinkWrap: true,
+                physics: const NeverScrollableScrollPhysics(),
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: crossAxisCount,
+                  crossAxisSpacing: spacing,
+                  mainAxisSpacing: spacing,
+                  childAspectRatio: aspectRatio,
                 ),
+                itemCount: quickQuestions.length,
+                itemBuilder: (context, index) {
+                  final item = quickQuestions[index];
+                  return _buildQuickQuestionCard(
+                    icon: item['icon'] as IconData,
+                    title: item['title'] as String,
+                    question: item['question'] as String,
+                    color: item['color'] as Color,
+                    isTablet: useCompactLayout,
+                  );
+                },
               ),
             ],
           ),
@@ -1913,7 +1925,7 @@ class _SettingsPageState extends State<SettingsPage> {
   final BackgroundDataService _backgroundService =
       BackgroundDataService.instance;
   bool _backgroundDataEnabled = false;
-  
+
   // User profile state
   String _userName = 'CityZen User';
   String _userDescription = 'Environmental Health Enthusiast';
@@ -1939,9 +1951,11 @@ class _SettingsPageState extends State<SettingsPage> {
       if (_userName == 'CityZen User' || _userName == 'Utente CityZen') {
         _userName = l10n?.cityZenUser ?? 'CityZen User';
       }
-      if (_userDescription == 'Environmental Health Enthusiast' || 
+      if (_userDescription == 'Environmental Health Enthusiast' ||
           _userDescription == 'Appassionato di Salute Ambientale') {
-        _userDescription = l10n?.environmentalHealthEnthusiast ?? 'Environmental Health Enthusiast';
+        _userDescription =
+            l10n?.environmentalHealthEnthusiast ??
+            'Environmental Health Enthusiast';
       }
     });
   }
@@ -1950,7 +1964,7 @@ class _SettingsPageState extends State<SettingsPage> {
     final l10n = AppLocalizations.of(context);
     final nameController = TextEditingController(text: _userName);
     final descriptionController = TextEditingController(text: _userDescription);
-    
+
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -1985,17 +1999,21 @@ class _SettingsPageState extends State<SettingsPage> {
           TextButton(
             onPressed: () {
               setState(() {
-                _userName = nameController.text.trim().isEmpty 
+                _userName = nameController.text.trim().isEmpty
                     ? (l10n?.cityZenUser ?? 'CityZen User')
                     : nameController.text.trim();
                 _userDescription = descriptionController.text.trim().isEmpty
-                    ? (l10n?.environmentalHealthEnthusiast ?? 'Environmental Health Enthusiast')
+                    ? (l10n?.environmentalHealthEnthusiast ??
+                          'Environmental Health Enthusiast')
                     : descriptionController.text.trim();
               });
               Navigator.of(context).pop();
               ScaffoldMessenger.of(context).showSnackBar(
                 SnackBar(
-                  content: Text(l10n?.profileUpdatedSuccessfully ?? 'Profile updated successfully'),
+                  content: Text(
+                    l10n?.profileUpdatedSuccessfully ??
+                        'Profile updated successfully',
+                  ),
                   backgroundColor: Colors.green,
                 ),
               );
@@ -2118,227 +2136,239 @@ class _SettingsPageState extends State<SettingsPage> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-            // Profile Section
-            _SettingsSection(
-              title: AppLocalizations.of(context)?.profile ?? 'Profile',
-              children: [
-                _SettingsCard(
-                  child: InkWell(
-                    onTap: () => _showEditProfileDialog(context),
-                    borderRadius: BorderRadius.circular(16),
-                    child: Row(
-                      children: [
-                        Container(
-                          width: 60,
-                          height: 60,
-                          decoration: BoxDecoration(
-                            color: AppColors.primary.withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(30),
+              // Profile Section
+              _SettingsSection(
+                title: AppLocalizations.of(context)?.profile ?? 'Profile',
+                children: [
+                  _SettingsCard(
+                    child: InkWell(
+                      onTap: () => _showEditProfileDialog(context),
+                      borderRadius: BorderRadius.circular(16),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 60,
+                            height: 60,
+                            decoration: BoxDecoration(
+                              color: AppColors.primary.withOpacity(0.1),
+                              borderRadius: BorderRadius.circular(30),
+                            ),
+                            child: Icon(
+                              Icons.person,
+                              size: 30,
+                              color: AppColors.primary,
+                            ),
                           ),
-                          child: Icon(
-                            Icons.person,
-                            size: 30,
-                            color: AppColors.primary,
-                          ),
-                        ),
-                        const SizedBox(width: 16),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                _userName,
-                                style: const TextStyle(
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.w700,
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  _userName,
+                                  style: const TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.w700,
+                                  ),
                                 ),
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                _userDescription,
-                                style: const TextStyle(
-                                  fontSize: 14,
-                                  color: Colors.grey,
+                                const SizedBox(height: 4),
+                                Text(
+                                  _userDescription,
+                                  style: const TextStyle(
+                                    fontSize: 14,
+                                    color: Colors.grey,
+                                  ),
                                 ),
-                              ),
-                            ],
+                              ],
+                            ),
                           ),
-                        ),
-                        Icon(Icons.edit, color: Colors.grey[400]),
-                      ],
+                          Icon(Icons.edit, color: Colors.grey[400]),
+                        ],
+                      ),
                     ),
                   ),
-                ),
-              ],
-            ),
+                ],
+              ),
 
-            // Location & Data Section
-            _SettingsSection(
-              title: AppLocalizations.of(context)?.locationAndData ?? 'Location & Data',
-              children: [
-                _SettingsTile(
-                  icon: Icons.location_city,
-                  title: AppLocalizations.of(context)?.location ?? 'Location',
-                  subtitle: AppLocalizations.of(context)?.milanItaly ?? 'Milan, Italy',
-                  onTap: () {},
-                ),
-                _SettingsTile(
-                  icon: Icons.my_location,
-                  title: AppLocalizations.of(context)?.locationServices ?? 'Location Services',
-                  subtitle: _locationEnabled 
-                      ? (AppLocalizations.of(context)?.enabled ?? 'Enabled')
-                      : (AppLocalizations.of(context)?.disabled ?? 'Disabled'),
-                  trailing: Switch(
-                    value: _locationEnabled,
-                    onChanged: (value) {
-                      setState(() => _locationEnabled = value);
-                    },
-                    activeColor: AppColors.primary,
+              // Location & Data Section
+              _SettingsSection(
+                title:
+                    AppLocalizations.of(context)?.locationAndData ??
+                    'Location & Data',
+                children: [
+                  _SettingsTile(
+                    icon: Icons.location_city,
+                    title: AppLocalizations.of(context)?.location ?? 'Location',
+                    subtitle:
+                        AppLocalizations.of(context)?.milanItaly ??
+                        'Milan, Italy',
+                    onTap: () {},
                   ),
-                ),
-              ],
-            ),
-
-            // Notifications Section
-            _SettingsSection(
-              title: AppLocalizations.of(context)?.notifications ?? 'Notifications',
-              children: [
-                _SettingsTile(
-                  icon: Icons.notifications,
-                  title: AppLocalizations.of(context)?.pushNotifications ?? 'Push Notifications',
-                  subtitle: _notificationsEnabled 
-                      ? (AppLocalizations.of(context)?.enabled ?? 'Enabled')
-                      : (AppLocalizations.of(context)?.disabled ?? 'Disabled'),
-                  trailing: Switch(
-                    value: _notificationsEnabled,
-                    onChanged: (value) {
-                      setState(() => _notificationsEnabled = value);
-                    },
-                    activeColor: AppColors.primary,
+                  _SettingsTile(
+                    icon: Icons.my_location,
+                    title:
+                        AppLocalizations.of(context)?.locationServices ??
+                        'Location Services',
+                    subtitle: _locationEnabled
+                        ? (AppLocalizations.of(context)?.enabled ?? 'Enabled')
+                        : (AppLocalizations.of(context)?.disabled ??
+                              'Disabled'),
+                    trailing: Switch(
+                      value: _locationEnabled,
+                      onChanged: (value) {
+                        setState(() => _locationEnabled = value);
+                      },
+                      activeColor: AppColors.primary,
+                    ),
                   ),
-                ),
-              ],
-            ),
+                ],
+              ),
 
-            // Language Section
-            _SettingsSection(
-              title: AppLocalizations.of(context)?.language ?? 'Language',
-              children: [
-                _SettingsTile(
-                  icon: Icons.language,
-                  title: AppLocalizations.of(context)?.language ?? 'Language',
-                  subtitle: LocaleService().locale.languageCode == 'it' 
-                      ? (AppLocalizations.of(context)?.italian ?? 'Italian')
-                      : (AppLocalizations.of(context)?.english ?? 'English'),
-                  onTap: () {
-                    final currentLocale = LocaleService().locale;
-                    final newLocale = currentLocale.languageCode == 'it' 
-                        ? const Locale('en')
-                        : const Locale('it');
-                    LocaleService().setLocale(newLocale);
-                  },
-                ),
-              ],
-            ),
+              // Notifications Section
+              _SettingsSection(
+                title:
+                    AppLocalizations.of(context)?.notifications ??
+                    'Notifications',
+                children: [
+                  _SettingsTile(
+                    icon: Icons.notifications,
+                    title:
+                        AppLocalizations.of(context)?.pushNotifications ??
+                        'Push Notifications',
+                    subtitle: _notificationsEnabled
+                        ? (AppLocalizations.of(context)?.enabled ?? 'Enabled')
+                        : (AppLocalizations.of(context)?.disabled ??
+                              'Disabled'),
+                    trailing: Switch(
+                      value: _notificationsEnabled,
+                      onChanged: (value) {
+                        setState(() => _notificationsEnabled = value);
+                      },
+                      activeColor: AppColors.primary,
+                    ),
+                  ),
+                ],
+              ),
 
-            // Performance & Threading Section
-            _SettingsSection(
-              title: 'Performance & Threading',
-              children: [
-                _SettingsTile(
-                  icon: Icons.sync,
-                  title: 'Background Data Sync',
-                  subtitle: _backgroundDataEnabled
-                      ? 'Active (Multi-threading)'
-                      : 'Disabled',
-                  trailing: Switch(
-                    value: _backgroundDataEnabled,
-                    onChanged: (value) async {
-                      if (value) {
-                        await _backgroundService.startBackgroundFetching();
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text(
-                              'Background data sync enabled (using Isolates)',
+              // Language Section
+              _SettingsSection(
+                title: AppLocalizations.of(context)?.language ?? 'Language',
+                children: [
+                  _SettingsTile(
+                    icon: Icons.language,
+                    title: AppLocalizations.of(context)?.language ?? 'Language',
+                    subtitle: LocaleService().locale.languageCode == 'it'
+                        ? (AppLocalizations.of(context)?.italian ?? 'Italian')
+                        : (AppLocalizations.of(context)?.english ?? 'English'),
+                    onTap: () {
+                      final currentLocale = LocaleService().locale;
+                      final newLocale = currentLocale.languageCode == 'it'
+                          ? const Locale('en')
+                          : const Locale('it');
+                      LocaleService().setLocale(newLocale);
+                    },
+                  ),
+                ],
+              ),
+
+              // Performance & Threading Section
+              _SettingsSection(
+                title: 'Performance & Threading',
+                children: [
+                  _SettingsTile(
+                    icon: Icons.sync,
+                    title: 'Background Data Sync',
+                    subtitle: _backgroundDataEnabled
+                        ? 'Active (Multi-threading)'
+                        : 'Disabled',
+                    trailing: Switch(
+                      value: _backgroundDataEnabled,
+                      onChanged: (value) async {
+                        if (value) {
+                          await _backgroundService.startBackgroundFetching();
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text(
+                                'Background data sync enabled (using Isolates)',
+                              ),
+                              backgroundColor: Colors.green,
                             ),
-                            backgroundColor: Colors.green,
-                          ),
-                        );
-                      } else {
-                        await _backgroundService.stopBackgroundFetching();
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(
-                            content: Text('Background data sync disabled'),
-                            backgroundColor: Colors.orange,
-                          ),
-                        );
-                      }
-                      setState(() => _backgroundDataEnabled = value);
-                    },
-                    activeColor: AppColors.primary,
+                          );
+                        } else {
+                          await _backgroundService.stopBackgroundFetching();
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text('Background data sync disabled'),
+                              backgroundColor: Colors.orange,
+                            ),
+                          );
+                        }
+                        setState(() => _backgroundDataEnabled = value);
+                      },
+                      activeColor: AppColors.primary,
+                    ),
                   ),
-                ),
-                _SettingsTile(
-                  icon: Icons.memory,
-                  title: 'Threading Demo',
-                  subtitle: 'Test multi-threading capabilities',
-                  onTap: () => _showThreadingDemo(),
-                ),
-              ],
-            ),
+                  _SettingsTile(
+                    icon: Icons.memory,
+                    title: 'Threading Demo',
+                    subtitle: 'Test multi-threading capabilities',
+                    onTap: () => _showThreadingDemo(),
+                  ),
+                ],
+              ),
 
-            // AI Configuration Section
-            _SettingsSection(
-              title: 'AI Assistant',
-              children: [
-                _SettingsTile(
-                  icon: Icons.smart_toy,
-                  title: 'AI Configuration',
-                  subtitle: AIConfigManager().isConfigured
-                      ? 'Gemini AI configured'
-                      : 'Configure Gemini API key',
-                  onTap: () => _showAIConfigDialog(context),
-                ),
-              ],
-            ),
+              // AI Configuration Section
+              _SettingsSection(
+                title: 'AI Assistant',
+                children: [
+                  _SettingsTile(
+                    icon: Icons.smart_toy,
+                    title: 'AI Configuration',
+                    subtitle: AIConfigManager().isConfigured
+                        ? 'Gemini AI configured'
+                        : 'Configure Gemini API key',
+                    onTap: () => _showAIConfigDialog(context),
+                  ),
+                ],
+              ),
 
-            // About Section
-            _SettingsSection(
-              title: 'About',
-              children: [
-                _SettingsTile(
-                  icon: Icons.info,
-                  title: 'About CityZen',
-                  subtitle: 'Version 1.0.0 - Environmental Health Assistant',
-                  onTap: () {},
-                ),
-              ],
-            ),
+              // About Section
+              _SettingsSection(
+                title: 'About',
+                children: [
+                  _SettingsTile(
+                    icon: Icons.info,
+                    title: 'About CityZen',
+                    subtitle: 'Version 1.0.0 - Environmental Health Assistant',
+                    onTap: () {},
+                  ),
+                ],
+              ),
 
-            // Account Section
-            _SettingsSection(
-              title: 'Account',
-              children: [
-                _SettingsTile(
-                  icon: Icons.logout,
-                  title: 'Sign Out',
-                  subtitle: 'Switch to a different account',
-                  onTap: () async {
-                    await AuthServiceDemo.instance.signOut();
-                    if (mounted) {
-                      Navigator.of(
-                        context,
-                      ).pushNamedAndRemoveUntil('/', (route) => false);
-                    }
-                  },
-                ),
-              ],
-            ),
+              // Account Section
+              _SettingsSection(
+                title: 'Account',
+                children: [
+                  _SettingsTile(
+                    icon: Icons.logout,
+                    title: 'Sign Out',
+                    subtitle: 'Switch to a different account',
+                    onTap: () async {
+                      await AuthServiceDemo.instance.signOut();
+                      if (mounted) {
+                        Navigator.of(
+                          context,
+                        ).pushNamedAndRemoveUntil('/', (route) => false);
+                      }
+                    },
+                  ),
+                ],
+              ),
 
-            const SizedBox(height: 32),
-          ],
+              const SizedBox(height: 32),
+            ],
+          ),
         ),
-      ),
       ),
     );
   }
