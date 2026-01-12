@@ -14,7 +14,7 @@ class _LoginPageState extends State<LoginPage> {
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
-  
+
   bool _obscurePassword = true;
   bool _isLoading = false;
 
@@ -35,6 +35,7 @@ class _LoginPageState extends State<LoginPage> {
       password: _passwordController.text,
     );
 
+    if (!mounted) return;
     setState(() => _isLoading = false);
 
     if (success && mounted) {
@@ -49,12 +50,15 @@ class _LoginPageState extends State<LoginPage> {
 
     final success = await AuthServiceDemo.instance.signInAnonymously();
 
+    if (!mounted) return;
     setState(() => _isLoading = false);
 
     if (success && mounted) {
       Navigator.of(context).pushReplacementNamed('/');
     } else if (mounted) {
-      _showErrorDialog(AuthServiceDemo.instance.errorMessage ?? 'Anonymous login failed');
+      _showErrorDialog(
+        AuthServiceDemo.instance.errorMessage ?? 'Anonymous login failed',
+      );
     }
   }
 
@@ -67,14 +71,19 @@ class _LoginPageState extends State<LoginPage> {
 
     setState(() => _isLoading = true);
 
-    final success = await AuthServiceDemo.instance.sendPasswordResetEmail(email);
+    final success = await AuthServiceDemo.instance.sendPasswordResetEmail(
+      email,
+    );
 
+    if (!mounted) return;
     setState(() => _isLoading = false);
 
     if (success && mounted) {
       _showSuccessDialog('Password reset email has been sent to your inbox');
     } else if (mounted) {
-      _showErrorDialog(AuthServiceDemo.instance.errorMessage ?? 'Failed to send reset email');
+      _showErrorDialog(
+        AuthServiceDemo.instance.errorMessage ?? 'Failed to send reset email',
+      );
     }
   }
 
@@ -123,7 +132,7 @@ class _LoginPageState extends State<LoginPage> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 const SizedBox(height: 60),
-                
+
                 // Logo
                 Center(
                   child: Container(
@@ -139,9 +148,9 @@ class _LoginPageState extends State<LoginPage> {
                     ),
                   ),
                 ),
-                
+
                 const SizedBox(height: 32),
-                
+
                 // Title
                 const Center(
                   child: Text(
@@ -153,9 +162,9 @@ class _LoginPageState extends State<LoginPage> {
                     ),
                   ),
                 ),
-                
+
                 const SizedBox(height: 8),
-                
+
                 const Center(
                   child: Text(
                     'Sign in to continue your environmental health journey',
@@ -167,9 +176,9 @@ class _LoginPageState extends State<LoginPage> {
                     ),
                   ),
                 ),
-                
+
                 const SizedBox(height: 48),
-                
+
                 // Email input
                 TextFormField(
                   controller: _emailController,
@@ -188,15 +197,17 @@ class _LoginPageState extends State<LoginPage> {
                     if (value == null || value.isEmpty) {
                       return 'Please enter your email';
                     }
-                    if (!RegExp(r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$').hasMatch(value)) {
+                    if (!RegExp(
+                      r'^[\w-\.]+@([\w-]+\.)+[\w-]{2,4}$',
+                    ).hasMatch(value)) {
                       return 'Please enter a valid email address';
                     }
                     return null;
                   },
                 ),
-                
+
                 const SizedBox(height: 16),
-                
+
                 // Password input
                 TextFormField(
                   controller: _passwordController,
@@ -207,7 +218,9 @@ class _LoginPageState extends State<LoginPage> {
                     prefixIcon: const Icon(Icons.lock_outlined),
                     suffixIcon: IconButton(
                       icon: Icon(
-                        _obscurePassword ? Icons.visibility_outlined : Icons.visibility_off_outlined,
+                        _obscurePassword
+                            ? Icons.visibility_outlined
+                            : Icons.visibility_off_outlined,
                       ),
                       onPressed: () {
                         setState(() => _obscurePassword = !_obscurePassword);
@@ -229,9 +242,9 @@ class _LoginPageState extends State<LoginPage> {
                     return null;
                   },
                 ),
-                
+
                 const SizedBox(height: 8),
-                
+
                 // Forgot password
                 Align(
                   alignment: Alignment.centerRight,
@@ -246,9 +259,9 @@ class _LoginPageState extends State<LoginPage> {
                     ),
                   ),
                 ),
-                
+
                 const SizedBox(height: 24),
-                
+
                 // Login button
                 SizedBox(
                   height: 56,
@@ -278,9 +291,9 @@ class _LoginPageState extends State<LoginPage> {
                           ),
                   ),
                 ),
-                
+
                 const SizedBox(height: 16),
-                
+
                 // Guest access button
                 SizedBox(
                   height: 56,
@@ -302,9 +315,9 @@ class _LoginPageState extends State<LoginPage> {
                     ),
                   ),
                 ),
-                
+
                 const SizedBox(height: 32),
-                
+
                 // Divider
                 Row(
                   children: [
@@ -322,19 +335,16 @@ class _LoginPageState extends State<LoginPage> {
                     Expanded(child: Divider(color: Colors.grey[300])),
                   ],
                 ),
-                
+
                 const SizedBox(height: 32),
-                
+
                 // Register link
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Text(
                       "Don't have an account? ",
-                      style: TextStyle(
-                        color: Colors.grey[600],
-                        fontSize: 16,
-                      ),
+                      style: TextStyle(color: Colors.grey[600], fontSize: 16),
                     ),
                     TextButton(
                       onPressed: () {
@@ -355,7 +365,7 @@ class _LoginPageState extends State<LoginPage> {
                     ),
                   ],
                 ),
-                
+
                 const SizedBox(height: 24),
               ],
             ),

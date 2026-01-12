@@ -121,10 +121,7 @@ class _MainShellState extends State<MainShell> {
         tabletLayout: const TabletHomePage(),
         desktopLayout: const TabletHomePage(),
       ),
-      ResponsiveLayout(
-        mobileLayout: const SimplifiedMapPage(),
-        tabletLayout: const EnvironmentalDataMasterDetail(),
-      ),
+      const SimplifiedMapPage(),
       const ActivityPage(),
       const SettingsPage(),
     ];
