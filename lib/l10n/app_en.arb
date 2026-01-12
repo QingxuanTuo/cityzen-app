@@ -1,0 +1,203 @@
+{
+  "@@locale": "en",
+  "appTitle": "CityZen",
+  "@appTitle": {
+    "description": "The title of the application"
+  },
+  "home": "Home",
+  "@home": {
+    "description": "Home navigation label"
+  },
+  "map": "Map",
+  "@map": {
+    "description": "Map navigation label"
+  },
+  "aiChat": "AI Chat",
+  "@aiChat": {
+    "description": "AI Chat navigation label"
+  },
+  "settings": "Settings",
+  "@settings": {
+    "description": "Settings navigation label"
+  },
+  "profile": "Profile",
+  "@profile": {
+    "description": "Profile section title"
+  },
+  "location": "Location",
+  "@location": {
+    "description": "Location label"
+  },
+  "locationAndData": "Location & Data",
+  "@locationAndData": {
+    "description": "Location & Data section title"
+  },
+  "notifications": "Notifications",
+  "@notifications": {
+    "description": "Notifications section title"
+  },
+  "language": "Language",
+  "@language": {
+    "description": "Language label"
+  },
+  "english": "English",
+  "@english": {
+    "description": "English language name"
+  },
+  "italian": "Italian",
+  "@italian": {
+    "description": "Italian language name"
+  },
+  "italiano": "Italiano",
+  "@italiano": {
+    "description": "Italian language name in Italian"
+  },
+  "locationServices": "Location Services",
+  "@locationServices": {
+    "description": "Location Services label"
+  },
+  "enabled": "Enabled",
+  "@enabled": {
+    "description": "Enabled status"
+  },
+  "disabled": "Disabled",
+  "@disabled": {
+    "description": "Disabled status"
+  },
+  "pushNotifications": "Push Notifications",
+  "@pushNotifications": {
+    "description": "Push Notifications label"
+  },
+  "cityZenUser": "CityZen User",
+  "@cityZenUser": {
+    "description": "Default user name"
+  },
+  "environmentalHealthEnthusiast": "Environmental Health Enthusiast",
+  "@environmentalHealthEnthusiast": {
+    "description": "Default user description"
+  },
+  "editProfile": "Edit Profile",
+  "@editProfile": {
+    "description": "Edit Profile dialog title"
+  },
+  "name": "Name",
+  "@name": {
+    "description": "Name field label"
+  },
+  "description": "Description",
+  "@description": {
+    "description": "Description field label"
+  },
+  "cancel": "Cancel",
+  "@cancel": {
+    "description": "Cancel button"
+  },
+  "save": "Save",
+  "@save": {
+    "description": "Save button"
+  },
+  "profileUpdatedSuccessfully": "Profile updated successfully",
+  "@profileUpdatedSuccessfully": {
+    "description": "Profile update success message"
+  },
+  "quickQuestions": "Quick Questions",
+  "@quickQuestions": {
+    "description": "Quick Questions section title"
+  },
+  "airQuality": "Air Quality",
+  "@airQuality": {
+    "description": "Air Quality quick question title"
+  },
+  "whatIsCurrentAirQuality": "What is the current air quality like?",
+  "@whatIsCurrentAirQuality": {
+    "description": "Air Quality quick question"
+  },
+  "outdoorActivity": "Outdoor Activity",
+  "@outdoorActivity": {
+    "description": "Outdoor Activity quick question title"
+  },
+  "isItSafeToExerciseOutdoors": "Is it safe to exercise outdoors today?",
+  "@isItSafeToExerciseOutdoors": {
+    "description": "Outdoor Activity quick question"
+  },
+  "healthTips": "Health Tips",
+  "@healthTips": {
+    "description": "Health Tips quick question title"
+  },
+  "giveMeHealthRecommendations": "Give me health recommendations for today",
+  "@giveMeHealthRecommendations": {
+    "description": "Health Tips quick question"
+  },
+  "precautions": "Precautions",
+  "@precautions": {
+    "description": "Precautions quick question title"
+  },
+  "whatPrecautionsShouldITake": "What precautions should I take today?",
+  "@whatPrecautionsShouldITake": {
+    "description": "Precautions quick question"
+  },
+  "askAboutEnvironmentalHealth": "Ask about environmental health...",
+  "@askAboutEnvironmentalHealth": {
+    "description": "AI Chat input placeholder"
+  },
+  "aiIsThinking": "AI is thinking...",
+  "@aiIsThinking": {
+    "description": "AI loading message"
+  },
+  "aiAssistantNotConfigured": "AI Assistant Not Configured",
+  "@aiAssistantNotConfigured": {
+    "description": "AI not configured title"
+  },
+  "aiNotConfiguredMessage": "To use the AI environmental health assistant, you need to configure your Gemini API key.",
+  "@aiNotConfiguredMessage": {
+    "description": "AI not configured message"
+  },
+  "milanItaly": "Milan, Italy",
+  "@milanItaly": {
+    "description": "Default location"
+  },
+  "environmentalHealthMap": "Environmental Health Map",
+  "@environmentalHealthMap": {
+    "description": "Map page title"
+  },
+  "goodMorning": "Good Morning!",
+  "@goodMorning": {
+    "description": "Morning greeting"
+  },
+  "goodAfternoon": "Good Afternoon!",
+  "@goodAfternoon": {
+    "description": "Afternoon greeting"
+  },
+  "goodEvening": "Good Evening!",
+  "@goodEvening": {
+    "description": "Evening greeting"
+  },
+  "pm25": "PM2.5",
+  "@pm25": {
+    "description": "PM2.5 label"
+  },
+  "wind": "Wind",
+  "@wind": {
+    "description": "Wind label"
+  },
+  "humidity": "Humidity",
+  "@humidity": {
+    "description": "Humidity label"
+  },
+  "temperature": "Temperature",
+  "@temperature": {
+    "description": "Temperature label"
+  },
+  "noDataAvailable": "No data available",
+  "@noDataAvailable": {
+    "description": "No data message"
+  },
+  "loadingFailed": "Loading failed",
+  "@loadingFailed": {
+    "description": "Loading error message"
+  },
+  "aiWelcomeMessage": "Hello! I'm your AI Environmental Health Assistant. I can provide daily life recommendations based on real-time environmental data to help you reduce environmental exposure risks. What would you like to know?",
+  "@aiWelcomeMessage": {
+    "description": "AI Chat welcome message"
+  }
+}

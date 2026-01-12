@@ -16,9 +16,15 @@ import 'package:cityzen/pages/auth/login_page.dart';
 import 'package:cityzen/pages/simplified_map_page.dart';
 import 'package:cityzen/pages/tablet_home_page.dart';
 import 'package:cityzen/services/background_data_service.dart';
+import 'package:cityzen/services/locale_service.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:cityzen/l10n/app_localizations.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // 初始化语言服务
+  await LocaleService().init();
 
   // 初始化Firebase和认证服务
   try {
@@ -38,14 +44,23 @@ class CityZenApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      debugShowCheckedModeBanner: false,
-      title: 'CityZen',
-      theme: AppTheme.light(),
-      home: const AuthWrapper(),
-      routes: {
-        '/login': (context) => const LoginPage(),
-        '/home': (context) => const MainShell(),
+    return ListenableBuilder(
+      listenable: LocaleService(),
+      builder: (context, child) {
+        final localeService = LocaleService();
+        return MaterialApp(
+          debugShowCheckedModeBanner: false,
+          title: 'CityZen',
+          theme: AppTheme.light(),
+          locale: localeService.locale,
+          localizationsDelegates: AppLocalizations.localizationsDelegates,
+          supportedLocales: AppLocalizations.supportedLocales,
+          home: const AuthWrapper(),
+          routes: {
+            '/login': (context) => const LoginPage(),
+            '/home': (context) => const MainShell(),
+          },
+        );
       },
     );
   }
@@ -118,12 +133,24 @@ class _MainShellState extends State<MainShell> {
     final pages = [
       ResponsiveLayout(
         mobileLayout: HomePage(onGoActivity: () => setState(() => _index = 2)),
-        tabletLayout: const TabletHomePage(),
-        desktopLayout: const TabletHomePage(),
+        tabletLayout: HomePage(onGoActivity: () => setState(() => _index = 2)),
+        desktopLayout: HomePage(onGoActivity: () => setState(() => _index = 2)),
       ),
-      const SimplifiedMapPage(),
-      const ActivityPage(),
-      const SettingsPage(),
+      ResponsiveLayout(
+        mobileLayout: const SimplifiedMapPage(),
+        tabletLayout: const SimplifiedMapPage(),
+        desktopLayout: const SimplifiedMapPage(),
+      ),
+      ResponsiveLayout(
+        mobileLayout: const ActivityPage(),
+        tabletLayout: const ActivityPage(),
+        desktopLayout: const ActivityPage(),
+      ),
+      ResponsiveLayout(
+        mobileLayout: const SettingsPage(),
+        tabletLayout: const SettingsPage(),
+        desktopLayout: const SettingsPage(),
+      ),
     ];
 
     return Scaffold(
@@ -131,16 +158,22 @@ class _MainShellState extends State<MainShell> {
       bottomNavigationBar: NavigationBar(
         selectedIndex: _index,
         onDestinationSelected: (i) => setState(() => _index = i),
-        destinations: const [
-          NavigationDestination(icon: Icon(Icons.home_outlined), label: 'Home'),
-          NavigationDestination(icon: Icon(Icons.map_outlined), label: 'Map'),
+        destinations: [
           NavigationDestination(
-            icon: Icon(Icons.chat_outlined),
-            label: 'AI Chat',
+            icon: const Icon(Icons.home_outlined),
+            label: AppLocalizations.of(context)?.home ?? 'Home',
           ),
           NavigationDestination(
-            icon: Icon(Icons.settings_outlined),
-            label: 'Settings',
+            icon: const Icon(Icons.map_outlined),
+            label: AppLocalizations.of(context)?.map ?? 'Map',
+          ),
+          NavigationDestination(
+            icon: const Icon(Icons.chat_outlined),
+            label: AppLocalizations.of(context)?.aiChat ?? 'AI Chat',
+          ),
+          NavigationDestination(
+            icon: const Icon(Icons.settings_outlined),
+            label: AppLocalizations.of(context)?.settings ?? 'Settings',
           ),
         ],
       ),
@@ -519,7 +552,7 @@ class _HomePageState extends State<HomePage> {
                     ),
                     const SizedBox(width: 8),
                     Text(
-                      'Milan, Italy',
+                      AppLocalizations.of(context)?.milanItaly ?? 'Milan, Italy',
                       style: const TextStyle(
                         fontWeight: FontWeight.w800,
                         fontSize: 14,
@@ -543,18 +576,18 @@ class _HomePageState extends State<HomePage> {
             : _error != null
             ? Center(
                 child: Text(
-                  'Loading failed:\n$_error',
+                  '${AppLocalizations.of(context)?.loadingFailed ?? 'Loading failed'}:\n$_error',
                   textAlign: TextAlign.center,
                 ),
               )
             : r == null
-            ? const Center(child: Text('No data available'))
+            ? Center(child: Text(AppLocalizations.of(context)?.noDataAvailable ?? 'No data available'))
             : Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   // ✅ 顶部 Header：定位 + 问候 + 日期 + 时间（参考图布局）
                   const SizedBox(height: 0),
-                  _HeaderTop(city: 'Milan, Italy'),
+                  _HeaderTop(city: AppLocalizations.of(context)?.milanItaly ?? 'Milan, Italy'),
                   const SizedBox(height: 14),
 
                   /// 🌦️ 环境评估卡片
@@ -644,7 +677,7 @@ class _HomePageState extends State<HomePage> {
                                   children: [
                                     Expanded(
                                       child: _MiniStatCard(
-                                        title: 'Wind',
+                                        title: AppLocalizations.of(context)?.wind ?? 'Wind',
                                         value: r.windKmh == null
                                             ? '—'
                                             : r.windKmh!.toStringAsFixed(1),
@@ -654,7 +687,7 @@ class _HomePageState extends State<HomePage> {
                                     const SizedBox(width: 10),
                                     Expanded(
                                       child: _MiniStatCard(
-                                        title: 'Humidity',
+                                        title: AppLocalizations.of(context)?.humidity ?? 'Humidity',
                                         value: r.humidity == null
                                             ? '—'
                                             : r.humidity!.toStringAsFixed(0),
@@ -668,7 +701,7 @@ class _HomePageState extends State<HomePage> {
                                         builder: (context) {
                                           final pmTag = _airQualityTag(r.pm25);
                                           return _MiniStatCard(
-                                            title: 'PM2.5',
+                                            title: AppLocalizations.of(context)?.pm25 ?? 'PM2.5',
                                             value: r.pm25 == null
                                                 ? '—'
                                                 : r.pm25!.toStringAsFixed(1),
@@ -1041,11 +1074,12 @@ class _HeaderTop extends StatelessWidget {
 
   const _HeaderTop({required this.city, super.key});
 
-  String _greeting(DateTime now) {
+  String _greeting(BuildContext context, DateTime now) {
+    final l10n = AppLocalizations.of(context);
     final h = now.hour;
-    if (h < 12) return 'Good Morning!';
-    if (h < 18) return 'Good Afternoon!';
-    return 'Good Evening!';
+    if (h < 12) return l10n?.goodMorning ?? 'Good Morning!';
+    if (h < 18) return l10n?.goodAfternoon ?? 'Good Afternoon!';
+    return l10n?.goodEvening ?? 'Good Evening!';
   }
 
   String _weekday(DateTime now) {
@@ -1084,7 +1118,7 @@ class _HeaderTop extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final now = DateTime.now();
-    final greeting = _greeting(now);
+    final greeting = _greeting(context, now);
     final dateLine = '${_weekday(now)}, ${now.day} ${_month(now)} ${now.year}';
     final timeLine = '${_two(now.hour)}:${_two(now.minute)}';
 
@@ -1340,10 +1374,18 @@ class _ActivityPageState extends State<ActivityPage> {
   void initState() {
     super.initState();
     _aiService = GeminiAIService();
-    _addWelcomeMessage();
+    // 延迟添加欢迎消息，确保context可用
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _addWelcomeMessage();
+      }
+    });
 
     // 监听环境数据变化
     _envManager.addListener(_onEnvironmentDataChanged);
+    
+    // 监听AI配置变化，确保配置保存后页面会重建
+    _aiConfigManager.addListener(_onAIConfigChanged);
 
     // 刷新AI配置
     _refreshAIService();
@@ -1356,6 +1398,7 @@ class _ActivityPageState extends State<ActivityPage> {
   @override
   void dispose() {
     _envManager.removeListener(_onEnvironmentDataChanged);
+    _aiConfigManager.removeListener(_onAIConfigChanged);
     super.dispose();
   }
 
@@ -1367,11 +1410,19 @@ class _ActivityPageState extends State<ActivityPage> {
     }
   }
 
+  void _onAIConfigChanged() {
+    if (mounted) {
+      setState(() {
+        // AI配置更新时刷新UI，确保_buildAIChat()使用最新的配置状态
+      });
+    }
+  }
+
   void _addWelcomeMessage() {
+    final l10n = AppLocalizations.of(context);
     _chatMessages.add(
       ChatMessage(
-        text:
-            "Hello! I'm your AI Environmental Health Assistant. I can provide daily life recommendations based on real-time environmental data to help you reduce environmental exposure risks. What would you like to know?",
+        text: l10n?.aiWelcomeMessage ?? "Hello! I'm your AI Environmental Health Assistant. I can provide daily life recommendations based on real-time environmental data to help you reduce environmental exposure risks. What would you like to know?",
         isUser: false,
         timestamp: DateTime.now(),
       ),
@@ -1380,6 +1431,24 @@ class _ActivityPageState extends State<ActivityPage> {
 
   Future<void> _sendChatMessage(String message) async {
     if (message.trim().isEmpty) return;
+
+    // 检查API配置，如果没有配置，提示用户去Settings配置
+    if (!_aiConfigManager.isConfigured) {
+      setState(() {
+        _chatMessages.add(
+          ChatMessage(text: message, isUser: true, timestamp: DateTime.now()),
+        );
+        _chatMessages.add(
+          ChatMessage(
+            text: "Please configure your AI API key in Settings to use the AI assistant. Go to Settings > AI Configuration to enter your Gemini API key.",
+            isUser: false,
+            timestamp: DateTime.now(),
+          ),
+        );
+      });
+      _chatController.clear();
+      return;
+    }
 
     setState(() {
       _chatMessages.add(
@@ -1449,7 +1518,7 @@ class _ActivityPageState extends State<ActivityPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('AI Chat'),
+        title: Text(AppLocalizations.of(context)?.aiChat ?? 'AI Chat'),
         backgroundColor: Colors.white,
         elevation: 0,
       ),
@@ -1458,201 +1527,300 @@ class _ActivityPageState extends State<ActivityPage> {
   }
 
   Widget _buildAIChat() {
-    // 检查AI是否已配置
-    if (!_aiConfigManager.isConfigured) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(Icons.smart_toy_outlined, size: 64, color: Colors.grey[400]),
-              const SizedBox(height: 16),
-              Text(
-                'AI Assistant Not Configured',
-                style: Theme.of(context).textTheme.headlineSmall,
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 8),
-              Text(
-                'To use the AI environmental health assistant, you need to configure your Gemini API key.',
-                style: Theme.of(context).textTheme.bodyMedium,
-                textAlign: TextAlign.center,
-              ),
-              const SizedBox(height: 24),
-              ElevatedButton.icon(
-                onPressed: () {
-                  // 显示配置说明对话框
-                  showDialog(
-                    context: context,
-                    builder: (context) => AlertDialog(
-                      title: const Text('Configure AI Assistant'),
-                      content: const Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('To enable the AI assistant:'),
-                          SizedBox(height: 8),
-                          Text('1. Go to Settings page'),
-                          Text('2. Tap "AI Configuration"'),
-                          Text('3. Enter your Gemini API key'),
-                          SizedBox(height: 12),
-                          Text(
-                            'Get your free API key from: https://aistudio.google.com/api-keys',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontStyle: FontStyle.italic,
-                            ),
-                          ),
-                        ],
-                      ),
-                      actions: [
-                        TextButton(
-                          onPressed: () => Navigator.of(context).pop(),
-                          child: const Text('OK'),
-                        ),
-                      ],
-                    ),
-                  );
-                },
-                icon: const Icon(Icons.settings),
-                label: const Text('Setup Instructions'),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.primary,
-                  foregroundColor: Colors.white,
-                ),
-              ),
-              const SizedBox(height: 16),
-              Text(
-                'Get your free API key from: https://aistudio.google.com/api-keys',
-                style: Theme.of(
-                  context,
-                ).textTheme.bodySmall?.copyWith(color: Colors.grey[600]),
-                textAlign: TextAlign.center,
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
-    return Column(
-      children: [
-        Expanded(
-          child: ListView.builder(
-            padding: const EdgeInsets.all(16),
-            reverse: false,
-            itemCount: _chatMessages.length + (_isAILoading ? 1 : 0),
-            itemBuilder: (context, index) {
-              if (index == _chatMessages.length && _isAILoading) {
-                return _buildLoadingBubble();
-              }
-              final message = _chatMessages[index];
-              return _buildChatBubble(message);
-            },
-          ),
-        ),
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.1),
-                blurRadius: 10,
-                offset: const Offset(0, -2),
-              ),
-            ],
-          ),
-          child: Column(
-            children: [
-              // 环境数据显示
-              Container(
-                padding: const EdgeInsets.all(12),
-                margin: const EdgeInsets.only(bottom: 12),
-                decoration: BoxDecoration(
-                  color: AppColors.primary.withOpacity(0.1),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: _currentEnvironmentData != null
-                    ? Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceAround,
-                        children: [
-                          _buildEnvDataChip(
-                            'PM2.5',
-                            '${_currentEnvironmentData!.pm25?.toStringAsFixed(1) ?? '--'}',
-                          ),
-                          _buildEnvDataChip(
-                            'Wind',
-                            '${_currentEnvironmentData!.windKmh?.toStringAsFixed(1) ?? '--'} km/h',
-                          ),
-                          _buildEnvDataChip(
-                            'Temp',
-                            '${_currentEnvironmentData!.temperatureC?.toStringAsFixed(1) ?? '--'}°C',
-                          ),
-                        ],
-                      )
-                    : const Text(
-                        'Environmental data not available. Please refresh on Home page.',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontStyle: FontStyle.italic,
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-              ),
-              Row(
+    // 直接显示聊天界面和快速问题卡片，不再检查配置状态
+    // API配置在Settings页面完成，发送消息时再检查配置
+    final isTablet = ScreenSize.isTablet(context);
+    
+    // 使用LayoutBuilder获取可用高度，确保不会溢出
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // 在非手机设备上，快速问题卡片使用固定的小高度
+        final screenWidth = MediaQuery.of(context).size.width;
+        final useCompactLayout = screenWidth >= 600;
+        
+        return Column(
+          children: [
+            // Quick questions cards - 在非手机设备上使用固定的小高度
+            if (useCompactLayout)
+              SizedBox(
+                height: 80, // 减小到80px，因为现在只有一行卡片
+                child: _buildQuickQuestionCards(),
+              )
+            else
+              _buildQuickQuestionCards(),
+            Expanded(
+              child: Column(
                 children: [
                   Expanded(
-                    child: TextField(
-                      controller: _chatController,
-                      decoration: InputDecoration(
-                        hintText: 'Ask about environmental health...',
-                        border: OutlineInputBorder(
-                          borderRadius: BorderRadius.circular(25),
-                        ),
-                        contentPadding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 12,
-                        ),
-                      ),
-                      onSubmitted: _isAILoading ? null : _sendChatMessage,
-                      enabled: !_isAILoading,
-                      maxLines: null,
+                    child: ListView.builder(
+                      padding: const EdgeInsets.all(16),
+                      reverse: false,
+                      itemCount: _chatMessages.length + (_isAILoading ? 1 : 0),
+                      itemBuilder: (context, index) {
+                        if (index == _chatMessages.length && _isAILoading) {
+                          return _buildLoadingBubble();
+                        }
+                        final message = _chatMessages[index];
+                        return _buildChatBubble(message);
+                      },
                     ),
                   ),
-                  const SizedBox(width: 8),
-                  FloatingActionButton(
-                    mini: true,
-                    onPressed: _isAILoading
-                        ? null
-                        : () => _sendChatMessage(_chatController.text),
-                    child: _isAILoading
-                        ? const SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.send),
-                  ),
-                ],
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.1),
+                      blurRadius: 10,
+                      offset: const Offset(0, -2),
+                    ),
+                  ],
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _chatController,
+                        decoration: InputDecoration(
+                          hintText: AppLocalizations.of(context)?.askAboutEnvironmentalHealth ?? 'Ask about environmental health...',
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(25),
+                          ),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 12,
+                          ),
+                        ),
+                        onSubmitted: _isAILoading ? null : _sendChatMessage,
+                        enabled: !_isAILoading,
+                        maxLines: null,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    FloatingActionButton(
+                      mini: true,
+                      onPressed: _isAILoading
+                          ? null
+                          : () => _sendChatMessage(_chatController.text),
+                      child: _isAILoading
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.send),
+                    ),
+                  ],
+                ),
               ),
             ],
           ),
         ),
       ],
+        );
+      },
     );
   }
 
-  Widget _buildEnvDataChip(String label, String value) {
-    return Column(
-      children: [
-        Text(
-          value,
-          style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+  Widget _buildQuickQuestionCards() {
+    final l10n = AppLocalizations.of(context);
+    
+    // 强制判断：只要不是手机（宽度>=600），就用紧凑布局
+    final screenWidth = MediaQuery.of(context).size.width;
+    final useCompactLayout = screenWidth >= 600;
+    
+    final quickQuestions = [
+      {
+        'icon': Icons.air,
+        'title': l10n?.airQuality ?? 'Air Quality',
+        'question': l10n?.whatIsCurrentAirQuality ?? 'What is the current air quality like?',
+        'color': Colors.blue,
+      },
+      {
+        'icon': Icons.directions_walk,
+        'title': l10n?.outdoorActivity ?? 'Outdoor Activity',
+        'question': l10n?.isItSafeToExerciseOutdoors ?? 'Is it safe to exercise outdoors today?',
+        'color': Colors.green,
+      },
+      {
+        'icon': Icons.health_and_safety,
+        'title': l10n?.healthTips ?? 'Health Tips',
+        'question': l10n?.giveMeHealthRecommendations ?? 'Give me health recommendations for today',
+        'color': Colors.orange,
+      },
+      {
+        'icon': Icons.warning,
+        'title': l10n?.precautions ?? 'Precautions',
+        'question': l10n?.whatPrecautionsShouldITake ?? 'What precautions should I take today?',
+        'color': Colors.red,
+      },
+    ];
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        // 使用直接判断，避免ResponsiveContainer干扰
+        // 在平板/桌面上：显示一行4个卡片，使用超大的aspectRatio让卡片非常矮
+        // 在手机上：显示两行2个卡片
+        final crossAxisCount = useCompactLayout ? 4 : 2;
+        final aspectRatio = useCompactLayout ? 3.5 : 1.4;
+        final spacing = useCompactLayout ? 6.0 : 8.0;
+        
+        // 计算GridView高度 - 在非手机设备上严格控制高度
+        double gridHeight;
+        double? containerHeight;
+        
+        if (useCompactLayout) {
+          // 平板/桌面上：一行4个卡片，固定高度
+          // 假设可用宽度是800px（ResponsiveContainer maxWidth）
+          // 每个卡片宽度 ≈ (800 - 32 - 18) / 4 = 187.5px
+          // 卡片高度 = 187.5 / 3.5 = 53.6px
+          // 只有一行，所以gridHeight = 53.6px ≈ 54px
+          containerHeight = 80.0; // 减小总高度到80px
+          gridHeight = 54.0; // 一行卡片高度
+        } else {
+          // 手机上：计算实际高度
+          final screenWidth = constraints.maxWidth;
+          final itemWidth = (screenWidth - 32 - spacing) / 2;
+          final itemHeight = itemWidth / aspectRatio;
+          gridHeight = (itemHeight * 2) + spacing;
+          containerHeight = null; // 手机不需要限制高度
+        }
+        
+        return Container(
+          height: containerHeight, // 在平板上必须限制Container总高度
+          padding: EdgeInsets.fromLTRB(16, isTablet ? 4 : 12, 16, isTablet ? 4 : 12),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            border: Border(
+              bottom: BorderSide(color: Colors.grey.withOpacity(0.2), width: 1),
+            ),
+          ),
+          clipBehavior: Clip.hardEdge, // 强制裁剪溢出内容
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: EdgeInsets.only(bottom: useCompactLayout ? 4 : 10),
+                child: Text(
+                  l10n?.quickQuestions ?? 'Quick Questions',
+                  style: TextStyle(
+                    fontSize: useCompactLayout ? 10 : 13,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.grey[700],
+                  ),
+                ),
+              ),
+              SizedBox(
+                height: gridHeight,
+                child: GridView.builder(
+                  physics: const NeverScrollableScrollPhysics(),
+                  shrinkWrap: true,
+                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: crossAxisCount,
+                    crossAxisSpacing: spacing,
+                    mainAxisSpacing: spacing,
+                    childAspectRatio: aspectRatio,
+                  ),
+                  itemCount: quickQuestions.length,
+                  itemBuilder: (context, index) {
+                    final item = quickQuestions[index];
+                    return _buildQuickQuestionCard(
+                      icon: item['icon'] as IconData,
+                      title: item['title'] as String,
+                      question: item['question'] as String,
+                      color: item['color'] as Color,
+                      isTablet: useCompactLayout,
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildQuickQuestionCard({
+    required IconData icon,
+    required String title,
+    required String question,
+    required Color color,
+    bool isTablet = false,
+  }) {
+    return InkWell(
+      onTap: () => _sendChatMessage(question),
+      borderRadius: BorderRadius.circular(isTablet ? 8 : 10),
+      child: Container(
+        decoration: BoxDecoration(
+          color: color.withOpacity(0.1),
+          borderRadius: BorderRadius.circular(isTablet ? 8 : 10),
+          border: Border.all(color: color.withOpacity(0.3), width: 1),
         ),
-        Text(label, style: TextStyle(fontSize: 10, color: Colors.grey[600])),
-      ],
+        child: Padding(
+          padding: EdgeInsets.symmetric(
+            horizontal: isTablet ? 6 : 10,
+            vertical: isTablet ? 4 : 10,
+          ),
+          child: isTablet
+              ? Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Icon(icon, color: color, size: 14),
+                    const SizedBox(height: 3),
+                    Text(
+                      title,
+                      style: TextStyle(
+                        fontSize: 9,
+                        fontWeight: FontWeight.bold,
+                        color: color,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                )
+              : Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(icon, color: color, size: 20),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            title,
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600,
+                              color: color,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            question,
+                            style: TextStyle(
+                              fontSize: 10,
+                              color: Colors.grey[700],
+                              height: 1.15,
+                            ),
+                            maxLines: 3,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+        ),
+      ),
     );
   }
 
@@ -1679,7 +1847,7 @@ class _ActivityPageState extends State<ActivityPage> {
             ),
             const SizedBox(width: 8),
             Text(
-              'AI is thinking...',
+              AppLocalizations.of(context)?.aiIsThinking ?? 'AI is thinking...',
               style: TextStyle(
                 color: Colors.grey[600],
                 fontStyle: FontStyle.italic,
@@ -1745,11 +1913,98 @@ class _SettingsPageState extends State<SettingsPage> {
   final BackgroundDataService _backgroundService =
       BackgroundDataService.instance;
   bool _backgroundDataEnabled = false;
+  
+  // User profile state
+  String _userName = 'CityZen User';
+  String _userDescription = 'Environmental Health Enthusiast';
 
   @override
   void initState() {
     super.initState();
     _aiConfigManager.loadConfig();
+    // Listen to locale changes
+    LocaleService().addListener(_onLocaleChanged);
+  }
+
+  @override
+  void dispose() {
+    LocaleService().removeListener(_onLocaleChanged);
+    super.dispose();
+  }
+
+  void _onLocaleChanged() {
+    setState(() {
+      // Update default values based on locale
+      final l10n = AppLocalizations.of(context);
+      if (_userName == 'CityZen User' || _userName == 'Utente CityZen') {
+        _userName = l10n?.cityZenUser ?? 'CityZen User';
+      }
+      if (_userDescription == 'Environmental Health Enthusiast' || 
+          _userDescription == 'Appassionato di Salute Ambientale') {
+        _userDescription = l10n?.environmentalHealthEnthusiast ?? 'Environmental Health Enthusiast';
+      }
+    });
+  }
+
+  void _showEditProfileDialog(BuildContext context) {
+    final l10n = AppLocalizations.of(context);
+    final nameController = TextEditingController(text: _userName);
+    final descriptionController = TextEditingController(text: _userDescription);
+    
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(l10n?.editProfile ?? 'Edit Profile'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            TextField(
+              controller: nameController,
+              decoration: InputDecoration(
+                labelText: l10n?.name ?? 'Name',
+                border: const OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: descriptionController,
+              decoration: InputDecoration(
+                labelText: l10n?.description ?? 'Description',
+                border: const OutlineInputBorder(),
+              ),
+              maxLines: 2,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: Text(l10n?.cancel ?? 'Cancel'),
+          ),
+          TextButton(
+            onPressed: () {
+              setState(() {
+                _userName = nameController.text.trim().isEmpty 
+                    ? (l10n?.cityZenUser ?? 'CityZen User')
+                    : nameController.text.trim();
+                _userDescription = descriptionController.text.trim().isEmpty
+                    ? (l10n?.environmentalHealthEnthusiast ?? 'Environmental Health Enthusiast')
+                    : descriptionController.text.trim();
+              });
+              Navigator.of(context).pop();
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text(l10n?.profileUpdatedSuccessfully ?? 'Profile updated successfully'),
+                  backgroundColor: Colors.green,
+                ),
+              );
+            },
+            child: Text(l10n?.save ?? 'Save'),
+          ),
+        ],
+      ),
+    );
   }
 
   void _showAIConfigDialog(BuildContext context) {
@@ -1851,60 +2106,67 @@ class _SettingsPageState extends State<SettingsPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Settings'),
+        title: Text(AppLocalizations.of(context)?.settings ?? 'Settings'),
         backgroundColor: Colors.white,
         elevation: 0,
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
+      body: ResponsiveContainer(
+        maxWidth: ScreenSize.isTablet(context) ? 900 : null,
+        padding: EdgeInsets.zero,
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
             // Profile Section
             _SettingsSection(
-              title: 'Profile',
+              title: AppLocalizations.of(context)?.profile ?? 'Profile',
               children: [
                 _SettingsCard(
-                  child: Row(
-                    children: [
-                      Container(
-                        width: 60,
-                        height: 60,
-                        decoration: BoxDecoration(
-                          color: AppColors.primary.withOpacity(0.1),
-                          borderRadius: BorderRadius.circular(30),
+                  child: InkWell(
+                    onTap: () => _showEditProfileDialog(context),
+                    borderRadius: BorderRadius.circular(16),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 60,
+                          height: 60,
+                          decoration: BoxDecoration(
+                            color: AppColors.primary.withOpacity(0.1),
+                            borderRadius: BorderRadius.circular(30),
+                          ),
+                          child: Icon(
+                            Icons.person,
+                            size: 30,
+                            color: AppColors.primary,
+                          ),
                         ),
-                        child: Icon(
-                          Icons.person,
-                          size: 30,
-                          color: AppColors.primary,
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      const Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'CityZen User',
-                              style: TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.w700,
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                _userName,
+                                style: const TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w700,
+                                ),
                               ),
-                            ),
-                            SizedBox(height: 4),
-                            Text(
-                              'Environmental Health Enthusiast',
-                              style: TextStyle(
-                                fontSize: 14,
-                                color: Colors.grey,
+                              const SizedBox(height: 4),
+                              Text(
+                                _userDescription,
+                                style: const TextStyle(
+                                  fontSize: 14,
+                                  color: Colors.grey,
+                                ),
                               ),
-                            ),
-                          ],
+                            ],
+                          ),
                         ),
-                      ),
-                      Icon(Icons.edit, color: Colors.grey[400]),
-                    ],
+                        Icon(Icons.edit, color: Colors.grey[400]),
+                      ],
+                    ),
                   ),
                 ),
               ],
@@ -1912,18 +2174,20 @@ class _SettingsPageState extends State<SettingsPage> {
 
             // Location & Data Section
             _SettingsSection(
-              title: 'Location & Data',
+              title: AppLocalizations.of(context)?.locationAndData ?? 'Location & Data',
               children: [
                 _SettingsTile(
                   icon: Icons.location_city,
-                  title: 'Location',
-                  subtitle: 'Milan, Italy (Fixed)',
+                  title: AppLocalizations.of(context)?.location ?? 'Location',
+                  subtitle: AppLocalizations.of(context)?.milanItaly ?? 'Milan, Italy',
                   onTap: () {},
                 ),
                 _SettingsTile(
                   icon: Icons.my_location,
-                  title: 'Location Services',
-                  subtitle: _locationEnabled ? 'Enabled' : 'Disabled',
+                  title: AppLocalizations.of(context)?.locationServices ?? 'Location Services',
+                  subtitle: _locationEnabled 
+                      ? (AppLocalizations.of(context)?.enabled ?? 'Enabled')
+                      : (AppLocalizations.of(context)?.disabled ?? 'Disabled'),
                   trailing: Switch(
                     value: _locationEnabled,
                     onChanged: (value) {
@@ -1937,12 +2201,14 @@ class _SettingsPageState extends State<SettingsPage> {
 
             // Notifications Section
             _SettingsSection(
-              title: 'Notifications',
+              title: AppLocalizations.of(context)?.notifications ?? 'Notifications',
               children: [
                 _SettingsTile(
                   icon: Icons.notifications,
-                  title: 'Push Notifications',
-                  subtitle: _notificationsEnabled ? 'Enabled' : 'Disabled',
+                  title: AppLocalizations.of(context)?.pushNotifications ?? 'Push Notifications',
+                  subtitle: _notificationsEnabled 
+                      ? (AppLocalizations.of(context)?.enabled ?? 'Enabled')
+                      : (AppLocalizations.of(context)?.disabled ?? 'Disabled'),
                   trailing: Switch(
                     value: _notificationsEnabled,
                     onChanged: (value) {
@@ -1950,6 +2216,27 @@ class _SettingsPageState extends State<SettingsPage> {
                     },
                     activeColor: AppColors.primary,
                   ),
+                ),
+              ],
+            ),
+
+            // Language Section
+            _SettingsSection(
+              title: AppLocalizations.of(context)?.language ?? 'Language',
+              children: [
+                _SettingsTile(
+                  icon: Icons.language,
+                  title: AppLocalizations.of(context)?.language ?? 'Language',
+                  subtitle: LocaleService().locale.languageCode == 'it' 
+                      ? (AppLocalizations.of(context)?.italian ?? 'Italian')
+                      : (AppLocalizations.of(context)?.english ?? 'English'),
+                  onTap: () {
+                    final currentLocale = LocaleService().locale;
+                    final newLocale = currentLocale.languageCode == 'it' 
+                        ? const Locale('en')
+                        : const Locale('it');
+                    LocaleService().setLocale(newLocale);
+                  },
                 ),
               ],
             ),
@@ -2051,6 +2338,7 @@ class _SettingsPageState extends State<SettingsPage> {
             const SizedBox(height: 32),
           ],
         ),
+      ),
       ),
     );
   }

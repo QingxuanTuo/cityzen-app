@@ -183,17 +183,20 @@ CURRENT CONDITIONS IN $city:
 LANGUAGE REQUIREMENT:
 $languageInstruction
 
+IMPORTANT: The user's input language indicates their language preference. You MUST respond in the SAME LANGUAGE as the user's input. If the user writes in Italian, respond in Italian. If the user writes in English, respond in English. Match the user's language exactly.
+
 USER INTENT ANALYSIS:
 $userIntent
 
 RESPONSE GUIDELINES:
-1. MATCH THE USER'S COMMUNICATION STYLE - if they greet, greet back; if they ask casually, respond casually
-2. Use simple paragraphs, no markdown formatting
-3. Use bullet points with • symbol only when listing information
-4. Keep sentences natural and conversational
-5. Maximum 200 words total
-6. Use emojis appropriately (1-3 per response)
-7. No headers, no bold text, no special formatting
+1. MATCH THE USER'S LANGUAGE - Use the EXACT SAME LANGUAGE as the user's input (Italian for Italian input, English for English input)
+2. MATCH THE USER'S COMMUNICATION STYLE - if they greet, greet back; if they ask casually, respond casually
+3. Use simple paragraphs, no markdown formatting
+4. Use bullet points with • symbol only when listing information
+5. Keep sentences natural and conversational
+6. Maximum 200 words total
+7. Use emojis appropriately (1-3 per response)
+8. No headers, no bold text, no special formatting
 
 HEALTH GUIDELINES FOR ENVIRONMENTAL EXPOSURE:
 • PM2.5: Good <15, Moderate 15-35, Poor 35-55, Very Poor >55 µg/m³

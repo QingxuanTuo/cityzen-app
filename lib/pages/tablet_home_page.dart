@@ -201,11 +201,14 @@ class _TabletHomePageState extends State<TabletHomePage> {
   }
 
   Widget _buildMasterPanel() {
+    final bottomPadding = MediaQuery.of(context).padding.bottom;
     return Container(
       padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
+      child: SingleChildScrollView(
+        padding: EdgeInsets.only(bottom: bottomPadding + 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
           // Location Header
           Container(
             padding: const EdgeInsets.all(12),
@@ -248,11 +251,12 @@ class _TabletHomePageState extends State<TabletHomePage> {
           
           _buildDetailSelector(),
           
-          const Spacer(),
+          const SizedBox(height: 16),
           
           // Quick Actions
           _buildQuickActions(),
         ],
+      ),
       ),
     );
   }
@@ -431,22 +435,26 @@ class _TabletHomePageState extends State<TabletHomePage> {
   }
 
   Widget _buildOverviewView() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          'Environmental Overview',
-          style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-        ),
-        const SizedBox(height: 16),
-        
-        if (_result != null) ...[
-          _buildOverviewCards(),
-          const SizedBox(height: 24),
-          _buildHealthRecommendations(),
-        ] else
-          const Center(child: Text('No data available')),
-      ],
+    final bottomPadding = MediaQuery.of(context).padding.bottom;
+    return SingleChildScrollView(
+      padding: EdgeInsets.only(bottom: bottomPadding + 24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text(
+            'Environmental Overview',
+            style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+          ),
+          const SizedBox(height: 16),
+          
+          if (_result != null) ...[
+            _buildOverviewCards(),
+            const SizedBox(height: 24),
+            _buildHealthRecommendations(),
+          ] else
+            const Center(child: Text('No data available')),
+        ],
+      ),
     );
   }
 
@@ -497,7 +505,10 @@ class _TabletHomePageState extends State<TabletHomePage> {
   }
 
   Widget _buildTrendsView() {
-    return Column(
+    final bottomPadding = MediaQuery.of(context).padding.bottom;
+    return SingleChildScrollView(
+      padding: EdgeInsets.only(bottom: bottomPadding + 24),
+      child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Text(
@@ -574,6 +585,7 @@ class _TabletHomePageState extends State<TabletHomePage> {
         ] else
           const Center(child: Text('No trend data available')),
       ],
+    ),
     );
   }
 
@@ -697,6 +709,7 @@ class _TabletHomePageState extends State<TabletHomePage> {
   }
 
   Widget _buildAIAdviceView() {
+    final bottomPadding = MediaQuery.of(context).padding.bottom;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -711,6 +724,7 @@ class _TabletHomePageState extends State<TabletHomePage> {
         else if (_aiAdvice.isNotEmpty)
           Expanded(
             child: SingleChildScrollView(
+              padding: EdgeInsets.only(bottom: bottomPadding + 24),
               child: Card(
                 child: Padding(
                   padding: const EdgeInsets.all(20),
