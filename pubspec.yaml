@@ -40,6 +40,8 @@ dependencies:
   geolocator: ^12.0.0
   fl_chart: ^0.68.0
   geocoding: ^2.1.0
+  timezone: ^0.9.4
+
   
   # Firebase dependencies - Compatible versions
   firebase_core: ^2.32.0

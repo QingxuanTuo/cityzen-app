@@ -6,28 +6,23 @@ class LocaleService extends ChangeNotifier {
   factory LocaleService() => _instance;
   LocaleService._internal();
 
-  Locale _locale = const Locale('en');
-  static const String _localeKey = 'app_locale';
+  static const _kLocaleCode = 'app_locale_code';
 
+  Locale _locale = const Locale('en');
   Locale get locale => _locale;
 
   Future<void> init() async {
-    final prefs = await SharedPreferences.getInstance();
-    final localeCode = prefs.getString(_localeKey) ?? 'en';
-    _locale = Locale(localeCode);
-    notifyListeners();
+    final sp = await SharedPreferences.getInstance();
+    final code = sp.getString(_kLocaleCode);
+    if (code != null && code.isNotEmpty) {
+      _locale = Locale(code);
+    }
   }
 
   Future<void> setLocale(Locale locale) async {
-    if (_locale == locale) return;
-    
     _locale = locale;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_localeKey, locale.languageCode);
     notifyListeners();
-  }
-
-  Future<void> setLanguage(String languageCode) async {
-    await setLocale(Locale(languageCode));
+    final sp = await SharedPreferences.getInstance();
+    await sp.setString(_kLocaleCode, locale.languageCode);
   }
 }

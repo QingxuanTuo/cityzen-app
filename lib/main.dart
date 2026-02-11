@@ -14,11 +14,15 @@ import 'package:cityzen/services/auth_service_demo.dart';
 import 'package:cityzen/services/user_data_service.dart';
 import 'package:cityzen/pages/auth/login_page.dart';
 import 'package:cityzen/pages/simplified_map_page.dart';
-import 'package:cityzen/pages/tablet_home_page.dart';
+import 'package:cityzen/pages/home_tablet_view.dart';
 import 'package:cityzen/services/background_data_service.dart';
-import 'package:cityzen/services/locale_service.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:cityzen/l10n/app_localizations.dart';
+import 'package:cityzen/services/location_preferences.dart';
+import 'package:cityzen/services/locale_service.dart';
+import 'package:cityzen/services/location_service.dart'; // AppLocation 在这里
+import 'package:cityzen/data/cities.dart';
+import 'dart:io'; // 为了用 HttpDate.parse
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -30,6 +34,7 @@ void main() async {
   try {
     await FirebaseService.instance.initialize();
     await AuthServiceDemo.instance.initialize();
+    await LocationPreferences.instance.load();
     debugPrint('CITYZEN SERVICES INITIALIZED');
   } catch (e) {
     debugPrint('CITYZEN INITIALIZATION ERROR: $e');
@@ -111,11 +116,14 @@ class MainShell extends StatefulWidget {
 
 class _MainShellState extends State<MainShell> {
   int _index = 0;
+  bool get _isTablet => MediaQuery.of(context).size.shortestSide >= 600;
+  List<Widget>? _tabletPages;
 
   @override
   void initState() {
     super.initState();
     _loadUserData();
+    AppLocation.instance.initAndFetch(); // ✅ 登录后立即拿定位
   }
 
   Future<void> _loadUserData() async {
@@ -131,47 +139,39 @@ class _MainShellState extends State<MainShell> {
   @override
   Widget build(BuildContext context) {
     final pages = [
-      ResponsiveLayout(
-        mobileLayout: HomePage(onGoActivity: () => setState(() => _index = 2)),
-        tabletLayout: HomePage(onGoActivity: () => setState(() => _index = 2)),
-        desktopLayout: HomePage(onGoActivity: () => setState(() => _index = 2)),
-      ),
-      ResponsiveLayout(
-        mobileLayout: const SimplifiedMapPage(),
-        tabletLayout: const SimplifiedMapPage(),
-        desktopLayout: const SimplifiedMapPage(),
-      ),
-      ResponsiveLayout(
-        mobileLayout: const ActivityPage(),
-        tabletLayout: const ActivityPage(),
-        desktopLayout: const ActivityPage(),
-      ),
-      ResponsiveLayout(
-        mobileLayout: const SettingsPage(),
-        tabletLayout: const SettingsPage(),
-        desktopLayout: const SettingsPage(),
-      ),
+      HomePage(onGoActivity: () => setState(() => _index = 2)),
+      const SimplifiedMapPage(),
+      const ActivityPage(),
+      const SettingsPage(),
     ];
 
     return Scaffold(
       body: SafeArea(child: pages[_index]),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _index,
-        onDestinationSelected: (i) => setState(() => _index = i),
-        destinations: [
-          NavigationDestination(
+      bottomNavigationBar: BottomNavigationBar(
+        currentIndex: _index,
+        onTap: (i) => setState(() => _index = i),
+
+        type: BottomNavigationBarType.fixed,
+
+        // ✅ 新增：强制颜色（手机 / 平板一致）
+        backgroundColor: Colors.black,
+        selectedItemColor: AppColors.primary,
+        unselectedItemColor: Colors.white,
+
+        items: [
+          BottomNavigationBarItem(
             icon: const Icon(Icons.home_outlined),
             label: AppLocalizations.of(context)?.home ?? 'Home',
           ),
-          NavigationDestination(
+          BottomNavigationBarItem(
             icon: const Icon(Icons.map_outlined),
             label: AppLocalizations.of(context)?.map ?? 'Map',
           ),
-          NavigationDestination(
+          BottomNavigationBarItem(
             icon: const Icon(Icons.chat_outlined),
             label: AppLocalizations.of(context)?.aiChat ?? 'AI Chat',
           ),
-          NavigationDestination(
+          BottomNavigationBarItem(
             icon: const Icon(Icons.settings_outlined),
             label: AppLocalizations.of(context)?.settings ?? 'Settings',
           ),
@@ -194,18 +194,74 @@ class _HomePageState extends State<HomePage> {
   bool _loading = false;
   String? _error;
   WeatherResult? _result;
+
+  // ✅ 这个会被“校准”为：让 DateTime.now().toUtc() + offset = API 的 current.time
+  int? _utcOffsetSeconds;
+  int _fetchSeq = 0;
+
   List<double> _pm25Trend = [];
   final EnvironmentDataManager _envManager = EnvironmentDataManager();
+
+  String _resolvePlaceName() {
+    final prefs = LocationPreferences.instance;
+    final loc = AppLocation.instance;
+
+    // GPS可用才显示GPS
+    final useGps =
+        prefs.useCurrentLocation && loc.lat != null && loc.lon != null;
+
+    if (useGps) return loc.displayName;
+
+    final fallbackCity = supportedCities.firstWhere(
+      (c) => c.key == prefs.cityKey,
+      orElse: () => supportedCities.first,
+    );
+    return fallbackCity.name;
+  }
 
   @override
   void initState() {
     super.initState();
-    // 直接加载数据，不再显示欢迎对话框
+    AppLocation.instance.addListener(_onLocationChanged);
     _fetchWeather();
   }
 
+  void _onLocationChanged() {
+    // 位置一旦从 null 变为有值，就刷新一次
+    if (!_loading &&
+        AppLocation.instance.lat != null &&
+        AppLocation.instance.lon != null) {
+      _fetchWeather();
+    }
+  }
+
+  @override
+  void dispose() {
+    AppLocation.instance.removeListener(_onLocationChanged);
+    super.dispose();
+  }
+
+  // ✅ 把 "2026-02-09T14:00" 这种“当地墙上时间”装进 UTC 容器，避免受设备时区影响
+  DateTime? _parseLocalWallTimeToUtcContainer(String? s) {
+    if (s == null) return null;
+    final dt = DateTime.tryParse(s);
+    if (dt == null) return null;
+
+    // 关键：不要用 dt.toUtc()（那会依赖设备时区解释它）
+    // 我们只取它的年月日时分秒，塞进一个 UTC DateTime 里当“容器”
+    return DateTime.utc(
+      dt.year,
+      dt.month,
+      dt.day,
+      dt.hour,
+      dt.minute,
+      dt.second,
+    );
+  }
+
   Future<void> _fetchWeather() async {
-    debugPrint('[_fetchWeather] CALLED at ${DateTime.now()}'); // ✅ 加在这里
+    final int seq = ++_fetchSeq; // 👈 就加在这里
+    debugPrint('[_fetchWeather] CALLED at ${DateTime.now()}');
 
     setState(() {
       _loading = true;
@@ -213,9 +269,25 @@ class _HomePageState extends State<HomePage> {
     });
 
     try {
-      // 使用指定的米兰坐标：45°28'51.3"N 9°13'30.4"E
-      const lat = 45.4809167;
-      const lon = 9.2251111;
+      final prefs = LocationPreferences.instance;
+      final loc = AppLocation.instance;
+
+      // 1) GPS 优先（前提：开关打开 + 真拿到了坐标）
+      final useGps =
+          prefs.useCurrentLocation && loc.lat != null && loc.lon != null;
+
+      // 2) fallback 城市（Settings 选择的）
+      final fallbackCity = supportedCities.firstWhere(
+        (c) => c.key == prefs.cityKey,
+        orElse: () => supportedCities.first,
+      );
+
+      // 3) 最终坐标
+      final lat = useGps ? loc.lat! : fallbackCity.lat;
+      final lon = useGps ? loc.lon! : fallbackCity.lon;
+
+      final placeName = useGps ? loc.displayName : fallbackCity.name;
+      debugPrint('Using location: $placeName ($lat, $lon)');
 
       final uri = Uri.parse(
         'https://api.open-meteo.com/v1/forecast'
@@ -223,7 +295,7 @@ class _HomePageState extends State<HomePage> {
         '&current=temperature_2m,wind_speed_10m,weathercode,relative_humidity_2m'
         '&timezone=auto',
       );
-      // ✅ 额外请求：空气质量（pm2_5 / pm10）
+
       final aqUri = Uri.parse(
         'https://air-quality-api.open-meteo.com/v1/air-quality'
         '?latitude=$lat&longitude=$lon'
@@ -231,6 +303,9 @@ class _HomePageState extends State<HomePage> {
         '&timezone=auto',
       );
 
+      // ---------------------------
+      // ① AQI
+      // ---------------------------
       final aqResp = await http.get(aqUri).timeout(const Duration(seconds: 10));
       if (aqResp.statusCode != 200) {
         throw Exception('AirQuality HTTP ${aqResp.statusCode}');
@@ -239,44 +314,40 @@ class _HomePageState extends State<HomePage> {
       final aqJson = jsonDecode(aqResp.body) as Map<String, dynamic>;
       final aqHourly = aqJson['hourly'] as Map<String, dynamic>?;
 
-      double? latestNonNull(List<dynamic>? list) {
-        if (list == null) return null;
-        for (var i = list.length - 1; i >= 0; i--) {
-          final v = list[i];
-          if (v is num) return v.toDouble();
-        }
-        return null;
-      }
-
       final times = (aqHourly?['time'] as List?) ?? [];
       final pm25Raw = (aqHourly?['pm2_5'] as List?) ?? [];
       final pm10Raw = (aqHourly?['pm10'] as List?) ?? [];
 
-      // 1) 把 time + value 对齐成列表（允许中间有 null）
-      DateTime? parseTime(dynamic t) {
-        if (t is String) {
-          // Open-Meteo 返回类似 "2026-01-11T16:00"
-          return DateTime.tryParse(t);
-        }
-        return null;
+      DateTime? parseTimeUtcContainer(dynamic t) {
+        if (t is! String) return null;
+        final dt = DateTime.tryParse(t);
+        if (dt == null) return null;
+        return DateTime.utc(
+          dt.year,
+          dt.month,
+          dt.day,
+          dt.hour,
+          dt.minute,
+          dt.second,
+        );
       }
 
-      // 找到“最接近现在”的小时索引
-      final now = DateTime.now();
+      // ✅ 用 UTC 做基准，减少设备时区/系统时间差异导致取点不同
+      final nowUtc = DateTime.now().toUtc();
+
       int nearestHourIndex = 0;
       Duration best = const Duration(days: 9999);
 
       for (int i = 0; i < times.length; i++) {
-        final dt = parseTime(times[i]);
-        if (dt == null) continue;
-        final d = (dt.difference(now)).abs();
+        final dtUtcContainer = parseTimeUtcContainer(times[i]);
+        if (dtUtcContainer == null) continue;
+        final d = (dtUtcContainer.difference(nowUtc)).abs();
         if (d < best) {
           best = d;
           nearestHourIndex = i;
         }
       }
 
-      // 2) 当前值：用 nearestHourIndex，而不是 last
       double? pickNumAt(List<dynamic> list, int idx) {
         if (idx < 0 || idx >= list.length) return null;
         final v = list[idx];
@@ -286,7 +357,6 @@ class _HomePageState extends State<HomePage> {
       final pm25 = pickNumAt(pm25Raw, nearestHourIndex);
       final pm10 = pickNumAt(pm10Raw, nearestHourIndex);
 
-      // 3) 趋势：从“当前小时”开始，每隔2小时取1个，取12个点
       final sampled = <double>[];
       for (
         int i = nearestHourIndex;
@@ -297,7 +367,6 @@ class _HomePageState extends State<HomePage> {
         if (v is num) sampled.add(v.toDouble());
       }
 
-      // 如果后面点不够（比如接口只给到未来较短范围），就从前面补齐
       if (sampled.length < 12) {
         for (int i = 0; i < pm25Raw.length && sampled.length < 12; i += 2) {
           final v = pm25Raw[i];
@@ -305,17 +374,13 @@ class _HomePageState extends State<HomePage> {
         }
       }
 
-      setState(() {
-        _pm25Trend = sampled;
-      });
-
-      // 观察：看看 index 和时间是否对
       debugPrint(
-        'AQI now=$now nearestIndex=$nearestHourIndex time=${times.isNotEmpty ? times[nearestHourIndex] : 'N/A'} pm25=$pm25 pm10=$pm10',
+        'AQI nowUtc=$nowUtc nearestIndex=$nearestHourIndex time=${times.isNotEmpty ? times[nearestHourIndex] : 'N/A'} pm25=$pm25 pm10=$pm10',
       );
 
-      debugPrint('AQ pm2_5=$pm25 pm10=$pm10');
-
+      // ---------------------------
+      // ② Weather (current)
+      // ---------------------------
       final resp = await http.get(uri).timeout(const Duration(seconds: 10));
       if (resp.statusCode != 200) {
         throw Exception('HTTP ${resp.statusCode}');
@@ -338,9 +403,38 @@ class _HomePageState extends State<HomePage> {
         humidity: humidity,
       );
 
-      setState(() => _result = result);
+      final apiOffset = (jsonMap['utc_offset_seconds'] as num?)?.toInt();
 
-      // 同步数据到全局管理器
+      // ✅ 用服务器时间修正设备时间（如果模拟器时间不准，会立刻救回来）
+      final deviceUtcAtFetch = DateTime.now().toUtc();
+      final dateHeader =
+          resp.headers['date']; // 例如 "Mon, 09 Feb 2026 12:34:56 GMT"
+
+      int? correctedOffset = apiOffset;
+
+      if (apiOffset != null && dateHeader != null) {
+        try {
+          final serverUtcAtFetch = HttpDate.parse(dateHeader).toUtc();
+          final clockSkewSeconds = serverUtcAtFetch
+              .difference(deviceUtcAtFetch)
+              .inSeconds;
+
+          // ✅ 让：deviceUtcNow + correctedOffset ≈ serverUtcNow + apiOffset
+          correctedOffset = apiOffset + clockSkewSeconds;
+        } catch (_) {
+          // 解析失败就退回 apiOffset
+          correctedOffset = apiOffset;
+        }
+      }
+
+      if (!mounted || seq != _fetchSeq) return;
+
+      setState(() {
+        _result = result;
+        _pm25Trend = sampled;
+        _utcOffsetSeconds = correctedOffset;
+      });
+
       _envManager.updateData(EnvironmentData.fromWeatherResult(result));
     } catch (e) {
       setState(() => _error = e.toString());
@@ -349,84 +443,35 @@ class _HomePageState extends State<HomePage> {
     }
   }
 
-  String _suggestion(WeatherResult r) {
-    final score = _sportScore(r);
-    if (score < 40) return 'Get started!';
-    if (score < 60) return 'Get started!';
-    return '';
-  }
-
   ({IconData icon, String label}) _weatherInfo(int? code) {
-    if (code == null) {
-      return (icon: Icons.help_outline, label: 'Unknown');
-    }
-
-    if (code == 0) {
-      return (icon: Icons.wb_sunny, label: 'Clear');
-    } else if (code <= 2) {
-      return (icon: Icons.wb_cloudy, label: 'Partly Cloudy');
-    } else if (code <= 3) {
-      return (icon: Icons.cloud, label: 'Overcast');
-    } else if (code == 45 || code == 48) {
-      return (icon: Icons.foggy, label: 'Fog');
-    } else if (code >= 51 && code <= 67) {
-      return (icon: Icons.umbrella, label: 'Rain');
-    } else if (code >= 71 && code <= 77) {
-      return (icon: Icons.ac_unit, label: 'Snow');
-    } else {
-      return (icon: Icons.cloud, label: 'Unstable');
-    }
+    if (code == null) return (icon: Icons.help_outline, label: 'Unknown');
+    if (code == 0) return (icon: Icons.wb_sunny, label: 'Clear');
+    if (code <= 2) return (icon: Icons.wb_cloudy, label: 'Partly Cloudy');
+    if (code <= 3) return (icon: Icons.cloud, label: 'Overcast');
+    if (code == 45 || code == 48) return (icon: Icons.foggy, label: 'Fog');
+    if (code >= 51 && code <= 67) return (icon: Icons.umbrella, label: 'Rain');
+    if (code >= 71 && code <= 77) return (icon: Icons.ac_unit, label: 'Snow');
+    return (icon: Icons.cloud, label: 'Unstable');
   }
 
-  // ✅ 右上角装饰 PNG：根据 Open-Meteo weathercode 映射
   String _weatherDecorAsset(int? code) {
-    if (code == null) {
-      return 'lib/assets/weather/cloudy.png';
-    }
-
-    // Clear / Sunny
-    if (code == 0) {
-      return 'lib/assets/weather/sunny.png';
-    }
-
-    // Mainly clear, partly cloudy, overcast
-    if (code >= 1 && code <= 3) {
-      return 'lib/assets/weather/cloudy.png';
-    }
-
-    // Fog
-    if (code == 45 || code == 48) {
-      return 'lib/assets/weather/fog.png';
-    }
-
-    // Drizzle
-    if (code >= 51 && code <= 57) {
-      return 'lib/assets/weather/drizzle.png';
-    }
-
-    // Rain / Showers
+    if (code == null) return 'lib/assets/weather/cloudy.png';
+    if (code == 0) return 'lib/assets/weather/sunny.png';
+    if (code >= 1 && code <= 3) return 'lib/assets/weather/cloudy.png';
+    if (code == 45 || code == 48) return 'lib/assets/weather/fog.png';
+    if (code >= 51 && code <= 57) return 'lib/assets/weather/drizzle.png';
     if ((code >= 61 && code <= 67) || (code >= 80 && code <= 82)) {
       return 'lib/assets/weather/showers.png';
     }
-
-    // Snow
     if ((code >= 71 && code <= 77) || (code >= 85 && code <= 86)) {
       return 'lib/assets/weather/snow.png';
     }
-
-    // Thunderstorm
-    if (code >= 95 && code <= 99) {
-      return 'lib/assets/weather/flightning.png';
-    }
-
-    // Fallback
+    if (code >= 95 && code <= 99) return 'lib/assets/weather/flightning.png';
     return 'lib/assets/weather/cloudy.png';
   }
 
   ({String label, Color color}) _airQualityTag(double? pm25) {
     if (pm25 == null) return (label: 'No data', color: Colors.grey);
-
-    // EAQI bands for PM2.5 (µg/m³): 0-5, 6-15, 16-50, 51-90, 91-140, >140
     if (pm25 <= 5) return (label: 'Good', color: Colors.green);
     if (pm25 <= 15) return (label: 'Fair', color: Colors.lightGreen);
     if (pm25 <= 50) return (label: 'Moderate', color: Colors.amber);
@@ -479,13 +524,239 @@ class _HomePageState extends State<HomePage> {
     return 'Not recommended';
   }
 
-  Color _pmColor(double? pm25) {
-    return _airQualityTag(pm25).color;
+  Color _pmColor(double? pm25) => _airQualityTag(pm25).color;
+
+  /// ✅ 手机端原来的 body：原封不动搬到这里
+  Widget _buildPhoneBody(BuildContext context) {
+    final r = _result;
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
+      child: _loading
+          ? const SizedBox(
+              height: 300,
+              child: Center(child: CircularProgressIndicator()),
+            )
+          : _error != null
+          ? Center(
+              child: Text(
+                '${AppLocalizations.of(context)?.loadingFailed ?? 'Loading failed'}:\n$_error',
+                textAlign: TextAlign.center,
+              ),
+            )
+          : r == null
+          ? Center(
+              child: Text(
+                AppLocalizations.of(context)?.noDataAvailable ??
+                    'No data available',
+              ),
+            )
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const SizedBox(height: 0),
+                _HeaderTop(
+                  city: _resolvePlaceName(),
+                  utcOffsetSeconds: _utcOffsetSeconds,
+                ),
+                const SizedBox(height: 14),
+
+                Card(
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  clipBehavior: Clip.none,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(20),
+                      gradient: const LinearGradient(
+                        begin: Alignment.topCenter,
+                        end: Alignment.bottomCenter,
+                        colors: [Color(0xFFDFF1FC), Color(0xFFBFDFA3)],
+                      ),
+                    ),
+                    child: Stack(
+                      clipBehavior: Clip.none,
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.all(16),
+                          child: Column(
+                            children: [
+                              const SizedBox(height: 0),
+                              Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Expanded(
+                                    child: Align(
+                                      alignment: Alignment.centerLeft,
+                                      child: Column(
+                                        mainAxisSize: MainAxisSize.min,
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            r.temperatureC == null
+                                                ? '—'
+                                                : '${r.temperatureC!.toStringAsFixed(1)} °C',
+                                            textAlign: TextAlign.left,
+                                            style: const TextStyle(
+                                              fontSize: 44,
+                                              fontWeight: FontWeight.w800,
+                                              letterSpacing: -1.2,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 6),
+                                          Text(
+                                            _weatherInfo(r.weatherCode).label,
+                                            textAlign: TextAlign.left,
+                                            style: TextStyle(
+                                              fontWeight: FontWeight.w700,
+                                              fontSize: 14,
+                                              height: 1.0,
+                                              color: Colors.black.withOpacity(
+                                                0.7,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                ],
+                              ),
+                              const SizedBox(height: 12),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: _MiniStatCard(
+                                      title:
+                                          AppLocalizations.of(context)?.wind ??
+                                          'Wind',
+                                      value: r.windKmh == null
+                                          ? '—'
+                                          : r.windKmh!.toStringAsFixed(1),
+                                      unit: 'km/h',
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: _MiniStatCard(
+                                      title:
+                                          AppLocalizations.of(
+                                            context,
+                                          )?.humidity ??
+                                          'Humidity',
+                                      value: r.humidity == null
+                                          ? '—'
+                                          : r.humidity!.toStringAsFixed(0),
+                                      unit: '%',
+                                      background: const Color(0xFFD9F0A7),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Builder(
+                                      builder: (context) {
+                                        return _MiniStatCard(
+                                          title:
+                                              AppLocalizations.of(
+                                                context,
+                                              )?.pm25 ??
+                                              'PM2.5',
+                                          value: r.pm25 == null
+                                              ? '—'
+                                              : r.pm25!.toStringAsFixed(1),
+                                          unit: 'µg/m³',
+                                        );
+                                      },
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                        Positioned(
+                          right: -36,
+                          top: -46,
+                          child: IgnorePointer(
+                            ignoring: true,
+                            child: Opacity(
+                              opacity: 1.0,
+                              child: Image.asset(
+                                _weatherDecorAsset(r.weatherCode),
+                                width: 230,
+                                height: 175,
+                                fit: BoxFit.contain,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 8),
+
+                Builder(
+                  builder: (context) {
+                    final tag = _airQualityTag(r.pm25);
+                    return _EAQICard(
+                      pm25: r.pm25,
+                      eaqiLabel: tag.label,
+                      eaqiColor: tag.color,
+                      advice: _eaqiAdvice(tag.label),
+                      trendValues: _pm25Trend,
+                    );
+                  },
+                ),
+
+                const SizedBox(height: 4),
+
+                Card(
+                  color: AppColors.primary,
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(22),
+                  ),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(22),
+                    onTap: widget.onGoActivity,
+                    child: const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 16),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.chat, color: Colors.white),
+                          SizedBox(width: 10),
+                          Text(
+                            'AI Advice >>',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 0.2,
+                              fontFamily: 'Inter',
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 90),
+              ],
+            ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    final r = _result;
+    final isTablet = MediaQuery.of(context).size.shortestSide >= 600;
 
     return Scaffold(
       appBar: AppBar(
@@ -495,16 +766,16 @@ class _HomePageState extends State<HomePage> {
           children: [
             Image.asset(
               'lib/assets/logo/cityzen_logo.png',
-              height: 40, // ✅ 控制 logo 大小（重点）
+              height: isTablet ? 68 : 40, // ✅ logo 再大一点（64 → 68）
               fit: BoxFit.contain,
             ),
-            const SizedBox(width: 10),
-            const Text(
+            SizedBox(width: isTablet ? 16 : 10), // ✅ 间距略收回
+            Text(
               'CityZen',
               style: TextStyle(
-                fontSize: 22,
-                fontWeight: FontWeight.w800,
-                letterSpacing: 0.8,
+                fontSize: isTablet ? 29 : 22, // ✅ 字号稍微收（32 → 29）
+                fontWeight: FontWeight.w900,
+                letterSpacing: isTablet ? 1.0 : 0.8, // ✅ 不要太夸张
                 color: Colors.black,
               ),
             ),
@@ -517,302 +788,70 @@ class _HomePageState extends State<HomePage> {
             onPressed: _loading ? null : _fetchWeather,
           ),
         ],
-
-        // ✅ AppBar 下方加"定位 pill"，像你参考图那样
-        bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(56),
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Container(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 10,
-                ),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(999),
-                  border: Border.all(color: Colors.black.withOpacity(0.06)),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.06),
-                      blurRadius: 10,
-                      offset: const Offset(0, 4),
-                    ),
-                  ],
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      Icons.location_on_outlined,
-                      size: 18,
-                      color: Colors.black.withOpacity(0.75),
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      AppLocalizations.of(context)?.milanItaly ??
-                          'Milan, Italy',
-                      style: const TextStyle(
-                        fontWeight: FontWeight.w800,
-                        fontSize: 14,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
-      ),
-
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 28),
-        child: _loading
-            ? const SizedBox(
-                height: 300,
-                child: Center(child: CircularProgressIndicator()),
-              )
-            : _error != null
-            ? Center(
-                child: Text(
-                  '${AppLocalizations.of(context)?.loadingFailed ?? 'Loading failed'}:\n$_error',
-                  textAlign: TextAlign.center,
-                ),
-              )
-            : r == null
-            ? Center(
-                child: Text(
-                  AppLocalizations.of(context)?.noDataAvailable ??
-                      'No data available',
-                ),
-              )
-            : Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // ✅ 顶部 Header：定位 + 问候 + 日期 + 时间（参考图布局）
-                  const SizedBox(height: 0),
-                  _HeaderTop(
-                    city:
-                        AppLocalizations.of(context)?.milanItaly ??
-                        'Milan, Italy',
-                  ),
-                  const SizedBox(height: 14),
-
-                  /// 🌦️ 环境评估卡片
-                  Card(
-                    elevation: 0,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    clipBehavior: Clip.none, // ✅ 允许溢出（半进半出）
+        bottom: isTablet
+            ? null // ✅ 平板不显示 AppBar.bottom（避免和 Tablet 页重复）
+            : PreferredSize(
+                preferredSize: const Size.fromHeight(56),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
                     child: Container(
-                      decoration: BoxDecoration(
-                        borderRadius: BorderRadius.circular(20),
-                        gradient: LinearGradient(
-                          begin: Alignment.topCenter,
-                          end: Alignment.bottomCenter,
-                          colors: [
-                            Color(0xFFDFF1FC), // 蓝
-                            Color(0xFFBFDFA3), // 稍深的绿
-                          ],
-                        ),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 10,
                       ),
-                      child: Stack(
-                        clipBehavior: Clip.none, // ✅ 允许 Stack 子组件溢出
-                        children: [
-                          // ✅ 原内容
-                          Padding(
-                            padding: const EdgeInsets.all(16),
-                            child: Column(
-                              children: [
-                                const SizedBox(height: 0),
-
-                                Row(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    // ✅ 左侧：温度 + 描述（改成 Column）
-                                    Expanded(
-                                      child: Align(
-                                        alignment:
-                                            Alignment.centerLeft, // ✅ 强制整组贴左
-                                        child: Column(
-                                          mainAxisSize: MainAxisSize.min,
-                                          crossAxisAlignment: CrossAxisAlignment
-                                              .start, // ✅ 文本左对齐
-                                          children: [
-                                            Text(
-                                              r.temperatureC == null
-                                                  ? '—'
-                                                  : '${r.temperatureC!.toStringAsFixed(1)} °C',
-                                              textAlign: TextAlign
-                                                  .left, // ✅ 确保不是 center
-                                              style: const TextStyle(
-                                                fontSize: 44,
-                                                fontWeight: FontWeight.w800,
-                                                letterSpacing: -1.2,
-                                              ),
-                                            ),
-                                            const SizedBox(height: 6),
-                                            Text(
-                                              _weatherInfo(r.weatherCode).label,
-                                              textAlign: TextAlign
-                                                  .left, // ✅ 确保不是 center
-                                              style: TextStyle(
-                                                fontWeight: FontWeight.w700,
-                                                fontSize: 14,
-                                                height: 1.0,
-                                                color: Colors.black.withOpacity(
-                                                  0.7,
-                                                ),
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                    ),
-
-                                    // ✅ 右侧：保持空位给装饰图（如果你右上角有 PNG 溢出，这里可以留一点宽度）
-                                    const SizedBox(width: 10),
-
-                                    // 右：图片区域（你原来这个 Column 没内容就别占位了）
-                                    // 如果你不需要任何右侧文字，把它删掉即可
-                                  ],
-                                ),
-
-                                const SizedBox(height: 12),
-
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: _MiniStatCard(
-                                        title:
-                                            AppLocalizations.of(
-                                              context,
-                                            )?.wind ??
-                                            'Wind',
-                                        value: r.windKmh == null
-                                            ? '—'
-                                            : r.windKmh!.toStringAsFixed(1),
-                                        unit: 'km/h',
-                                      ),
-                                    ),
-                                    const SizedBox(width: 10),
-                                    Expanded(
-                                      child: _MiniStatCard(
-                                        title:
-                                            AppLocalizations.of(
-                                              context,
-                                            )?.humidity ??
-                                            'Humidity',
-                                        value: r.humidity == null
-                                            ? '—'
-                                            : r.humidity!.toStringAsFixed(0),
-                                        unit: '%',
-                                        background: const Color(0xFFD9F0A7),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 10),
-                                    Expanded(
-                                      child: Builder(
-                                        builder: (context) {
-                                          final pmTag = _airQualityTag(r.pm25);
-                                          return _MiniStatCard(
-                                            title:
-                                                AppLocalizations.of(
-                                                  context,
-                                                )?.pm25 ??
-                                                'PM2.5',
-                                            value: r.pm25 == null
-                                                ? '—'
-                                                : r.pm25!.toStringAsFixed(1),
-                                            unit: 'µg/m³',
-                                          );
-                                        },
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(999),
+                        border: Border.all(
+                          color: Colors.black.withOpacity(0.06),
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.06),
+                            blurRadius: 10,
+                            offset: const Offset(0, 4),
                           ),
-
-                          // ✅ 右上角装饰 PNG（半进半出）
-                          Positioned(
-                            right: -36,
-                            top: -46,
-                            child: IgnorePointer(
-                              ignoring: true,
-                              child: Opacity(
-                                opacity: 01.00,
-                                child: Image.asset(
-                                  _weatherDecorAsset(r.weatherCode),
-                                  width: 230,
-                                  height: 175,
-                                  fit: BoxFit.contain,
-                                ),
-                              ),
+                        ],
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            Icons.location_on_outlined,
+                            size: 18,
+                            color: Colors.black.withOpacity(0.75),
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            _resolvePlaceName(),
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w800,
+                              fontSize: 14,
                             ),
                           ),
                         ],
                       ),
                     ),
                   ),
-                  const SizedBox(height: 8),
-                  // ✅ EAQI 总览卡片（新加）
-                  Builder(
-                    builder: (context) {
-                      final tag = _airQualityTag(r.pm25);
-                      return _EAQICard(
-                        pm25: r.pm25,
-                        eaqiLabel: tag.label,
-                        eaqiColor: tag.color,
-                        advice: _eaqiAdvice(tag.label),
-                        trendValues: _pm25Trend,
-                      );
-                    },
-                  ),
-
-                  const SizedBox(height: 4),
-
-                  /// 🤖 AI Advice 卡片（可点击跳转到 AI Chat）
-                  Card(
-                    color: AppColors.primary,
-                    elevation: 0,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(22),
-                    ),
-                    child: InkWell(
-                      borderRadius: BorderRadius.circular(22),
-                      onTap: widget.onGoActivity, // ✅ 点这里切到 AI Chat tab
-                      child: Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 16),
-                        child: Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            const Icon(Icons.chat, color: Colors.white),
-                            const SizedBox(width: 10),
-                            const Text(
-                              'AI Advice >>',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 16,
-                                fontWeight: FontWeight.w700,
-                                letterSpacing: 0.2,
-                                fontFamily: 'Inter',
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-
-                  const SizedBox(height: 90),
-                ],
+                ),
               ),
       ),
+
+      // ✅ 这里：平板用两栏 TabletHomeView；手机用原来的滚动 UI
+      body: isTablet
+          ? TabletHomeView(
+              loading: _loading,
+              error: _error,
+              result: _result,
+              pm25Trend: _pm25Trend,
+              locationLabel: _resolvePlaceName(),
+              onRefresh: _fetchWeather,
+              onGoAIChat: widget.onGoActivity,
+              utcOffsetSeconds: _utcOffsetSeconds, // ✅ 校准后的 offset
+            )
+          : _buildPhoneBody(context),
     );
   }
 }
@@ -1093,8 +1132,9 @@ class _InfoRow extends StatelessWidget {
 
 class _HeaderTop extends StatelessWidget {
   final String city;
+  final int? utcOffsetSeconds;
 
-  const _HeaderTop({required this.city, super.key});
+  const _HeaderTop({required this.city, this.utcOffsetSeconds, super.key});
 
   String _greeting(BuildContext context, DateTime now) {
     final l10n = AppLocalizations.of(context);
@@ -1137,61 +1177,69 @@ class _HeaderTop extends StatelessWidget {
 
   String _two(int v) => v < 10 ? '0$v' : '$v';
 
+  DateTime _localNow() {
+    // ✅ 不依赖设备本地时区：统一用 UTC + offset
+    if (utcOffsetSeconds == null) return DateTime.now();
+    return DateTime.now().toUtc().add(Duration(seconds: utcOffsetSeconds!));
+  }
+
   @override
   Widget build(BuildContext context) {
-    final now = DateTime.now();
-    final greeting = _greeting(context, now);
-    final dateLine = '${_weekday(now)}, ${now.day} ${_month(now)} ${now.year}';
-    final timeLine = '${_two(now.hour)}:${_two(now.minute)}';
+    return StreamBuilder<int>(
+      stream: Stream.periodic(const Duration(seconds: 30), (i) => i),
+      builder: (context, _) {
+        final now = _localNow();
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // 问候 + 日期（左）  时间（右）
-        Row(
+        final greeting = _greeting(context, now);
+        final dateLine =
+            '${_weekday(now)}, ${now.day} ${_month(now)} ${now.year}';
+        final timeLine = '${_two(now.hour)}:${_two(now.minute)}';
+
+        return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // 左侧
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    greeting,
-                    style: const TextStyle(
-                      fontSize: 26,
-                      fontWeight: FontWeight.w900,
-                      height: 1.05,
-                    ),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        greeting,
+                        style: const TextStyle(
+                          fontSize: 26,
+                          fontWeight: FontWeight.w900,
+                          height: 1.05,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        dateLine,
+                        style: TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w700,
+                          color: Colors.black.withOpacity(0.55),
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 6),
-                  Text(
-                    dateLine,
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.black.withOpacity(0.55),
-                    ),
+                ),
+                const SizedBox(width: 12),
+                Text(
+                  timeLine,
+                  style: const TextStyle(
+                    fontSize: 34,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: -0.8,
+                    height: 1.0,
                   ),
-                ],
-              ),
-            ),
-
-            const SizedBox(width: 12),
-
-            // 右侧大时间
-            Text(
-              timeLine,
-              style: const TextStyle(
-                fontSize: 34,
-                fontWeight: FontWeight.w900,
-                letterSpacing: -0.8,
-                height: 1.0,
-              ),
+                ),
+              ],
             ),
           ],
-        ),
-      ],
+        );
+      },
     );
   }
 }
@@ -1388,6 +1436,7 @@ class _ActivityPageState extends State<ActivityPage> {
   bool _isAILoading = false;
   final EnvironmentDataManager _envManager = EnvironmentDataManager();
   final AIConfigManager _aiConfigManager = AIConfigManager();
+  bool get isTablet => MediaQuery.of(context).size.shortestSide >= 600;
 
   // 当前环境数据（从全局管理器获取）
   EnvironmentData? get _currentEnvironmentData => _envManager.currentData;
@@ -1502,8 +1551,19 @@ class _ActivityPageState extends State<ActivityPage> {
         });
         return;
       }
+      final prefs = LocationPreferences.instance;
+      final loc = AppLocation.instance;
 
-      // 使用真实的Gemini AI服务
+      final city =
+          (prefs.useCurrentLocation && loc.lat != null && loc.lon != null)
+          ? loc.displayName
+          : supportedCities
+                .firstWhere(
+                  (c) => c.key == prefs.cityKey,
+                  orElse: () => supportedCities.first,
+                )
+                .name;
+
       final aiResponse = await _aiService.getEnvironmentalAdvice(
         userMessage: message,
         pm25: envData.pm25,
@@ -1511,7 +1571,7 @@ class _ActivityPageState extends State<ActivityPage> {
         windSpeed: envData.windKmh,
         temperature: envData.temperatureC,
         weatherCode: envData.weatherCode,
-        city: 'Milan',
+        city: city,
       );
 
       setState(() {
@@ -1541,6 +1601,8 @@ class _ActivityPageState extends State<ActivityPage> {
 
   @override
   Widget build(BuildContext context) {
+    final isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+
     return Scaffold(
       appBar: AppBar(
         title: Text(AppLocalizations.of(context)?.aiChat ?? 'AI Chat'),
@@ -1565,8 +1627,9 @@ class _ActivityPageState extends State<ActivityPage> {
 
         return Column(
           children: [
-            // Quick questions cards
+            // Quick questions cards - 在非手机设备上使用固定的小高度
             _buildQuickQuestionCards(),
+
             Expanded(
               child: Column(
                 children: [
@@ -1696,15 +1759,37 @@ class _ActivityPageState extends State<ActivityPage> {
         // 在平板/桌面上：显示一行4个卡片，使用超大的aspectRatio让卡片非常矮
         // 在手机上：显示两行2个卡片
         final crossAxisCount = useCompactLayout ? 4 : 2;
-        final aspectRatio = useCompactLayout ? 3.5 : 1.4;
+        final aspectRatio = useCompactLayout ? 2.8 : 1.4;
         final spacing = useCompactLayout ? 6.0 : 8.0;
 
+        // 计算GridView高度 - 在非手机设备上严格控制高度
+        double gridHeight;
+        double? containerHeight;
+
+        if (useCompactLayout) {
+          // 平板/桌面上：一行4个卡片，固定高度
+          // 假设可用宽度是800px（ResponsiveContainer maxWidth）
+          // 每个卡片宽度 ≈ (800 - 32 - 18) / 4 = 187.5px
+          // 卡片高度 = 187.5 / 3.5 = 53.6px
+          // 只有一行，所以gridHeight = 53.6px ≈ 54px
+          containerHeight = 130; // ✅ 80 → 96
+          gridHeight = 92.0; // ✅ 54 → 64（给文字留呼吸）
+        } else {
+          // 手机上：计算实际高度
+          final screenWidth = constraints.maxWidth;
+          final itemWidth = (screenWidth - 32 - spacing) / 2;
+          final itemHeight = itemWidth / aspectRatio;
+          gridHeight = (itemHeight * 2) + spacing;
+          containerHeight = null; // 手机不需要限制高度
+        }
+
         return Container(
+          // ✅ 不要写死 height，让它根据内容自然长高
           padding: EdgeInsets.fromLTRB(
             16,
-            useCompactLayout ? 4 : 12,
+            useCompactLayout ? 10 : 12,
             16,
-            useCompactLayout ? 4 : 12,
+            useCompactLayout ? 10 : 12,
           ),
           decoration: BoxDecoration(
             color: Colors.white,
@@ -1717,24 +1802,27 @@ class _ActivityPageState extends State<ActivityPage> {
             mainAxisSize: MainAxisSize.min,
             children: [
               Padding(
-                padding: EdgeInsets.only(bottom: useCompactLayout ? 4 : 10),
+                padding: EdgeInsets.only(bottom: useCompactLayout ? 8 : 10),
                 child: Text(
                   l10n?.quickQuestions ?? 'Quick Questions',
                   style: TextStyle(
-                    fontSize: useCompactLayout ? 10 : 13,
-                    fontWeight: FontWeight.w600,
+                    fontSize: useCompactLayout ? 13 : 13,
+                    fontWeight: FontWeight.w700,
                     color: Colors.grey[700],
+                    letterSpacing: 0.4,
                   ),
                 ),
               ),
+
+              // ✅ 不要再用 SizedBox(height: gridHeight) 卡死
               GridView.builder(
-                shrinkWrap: true,
                 physics: const NeverScrollableScrollPhysics(),
+                shrinkWrap: true, // ✅ 关键：让 Grid 自己算出需要的高度
                 gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: crossAxisCount,
-                  crossAxisSpacing: spacing,
-                  mainAxisSpacing: spacing,
-                  childAspectRatio: aspectRatio,
+                  crossAxisCount: useCompactLayout ? 4 : 2,
+                  crossAxisSpacing: useCompactLayout ? 10 : 8,
+                  mainAxisSpacing: useCompactLayout ? 10 : 8,
+                  childAspectRatio: useCompactLayout ? 2.6 : 1.4, // 平板你已经调好的比例
                 ),
                 itemCount: quickQuestions.length,
                 itemBuilder: (context, index) {
@@ -1773,24 +1861,47 @@ class _ActivityPageState extends State<ActivityPage> {
         ),
         child: Padding(
           padding: EdgeInsets.symmetric(
-            horizontal: isTablet ? 6 : 10,
-            vertical: isTablet ? 4 : 10,
+            horizontal: isTablet ? 10 : 10,
+            vertical: isTablet ? 14 : 10, // 👈 关键：这里
           ),
+
           child: isTablet
               ? Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    Icon(icon, color: color, size: 14),
-                    const SizedBox(height: 3),
+                    // ✅ 第一行：icon + title
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(icon, color: color, size: 22),
+                        const SizedBox(width: 6),
+                        Text(
+                          title,
+                          style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w800,
+                            color: color,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
+                    ),
+
+                    const SizedBox(height: 6),
+
+                    // ✅ 第二行：描述文字
                     Text(
-                      title,
+                      question,
                       style: TextStyle(
-                        fontSize: 9,
-                        fontWeight: FontWeight.bold,
-                        color: color,
+                        fontSize: 10,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.grey[700],
+                        height: 1.2,
                       ),
-                      maxLines: 1,
+                      maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       textAlign: TextAlign.center,
                     ),
@@ -1934,8 +2045,119 @@ class _SettingsPageState extends State<SettingsPage> {
   void initState() {
     super.initState();
     _aiConfigManager.loadConfig();
-    // Listen to locale changes
     LocaleService().addListener(_onLocaleChanged);
+
+    LocationPreferences.instance.load().then((_) {
+      if (mounted) setState(() {});
+    });
+  }
+
+  void _showLocationDialog(BuildContext context) async {
+    // 兜底：确保偏好已加载
+    await LocationPreferences.instance.load();
+
+    bool useCurrent = LocationPreferences.instance.useCurrentLocation;
+    String selectedKey = LocationPreferences.instance.cityKey;
+
+    showDialog(
+      context: context,
+      builder: (context) {
+        return StatefulBuilder(
+          builder: (context, setLocalState) {
+            final selectedCity = supportedCities.firstWhere(
+              (c) => c.key == selectedKey,
+              orElse: () => supportedCities.first,
+            );
+
+            return AlertDialog(
+              title: const Text('Location'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Use Current Location (GPS)'),
+                    value: useCurrent,
+                    onChanged: (v) async {
+                      setLocalState(() => useCurrent = v);
+                      await LocationPreferences.instance.setUseCurrent(v);
+
+                      if (v) {
+                        await AppLocation.instance.initAndFetch();
+                      }
+
+                      if (mounted) setState(() {}); // 刷新 Settings subtitle
+                    },
+                  ),
+                  const SizedBox(height: 12),
+
+                  const Text('Choose City (fallback):'),
+                  const SizedBox(height: 8),
+
+                  DropdownButtonFormField<String>(
+                    value: selectedKey,
+                    items: [
+                      for (final c in supportedCities)
+                        DropdownMenuItem(value: c.key, child: Text(c.name)),
+                    ],
+                    onChanged: (key) async {
+                      if (key == null) return;
+
+                      setLocalState(() => selectedKey = key);
+                      await LocationPreferences.instance.setCityKey(key);
+
+                      // 选城市时，自动关 GPS（可控降级）
+                      if (useCurrent) {
+                        useCurrent = false;
+                        await LocationPreferences.instance.setUseCurrent(false);
+                        setLocalState(() {});
+                      }
+
+                      if (mounted) setState(() {}); // 刷新 Settings subtitle
+
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            'Location updated. Go Home and tap refresh.',
+                          ),
+                        ),
+                      );
+
+                      // ✅ 关闭弹窗并提示用户回 Home 刷新
+                      Navigator.pop(context);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text(
+                            'Location saved. Go Home and tap refresh.',
+                          ),
+                        ),
+                      );
+                    },
+
+                    decoration: const InputDecoration(
+                      border: OutlineInputBorder(),
+                    ),
+                  ),
+
+                  const SizedBox(height: 10),
+                  Text(
+                    'Current fallback: ${selectedCity.name}\n(${selectedCity.lat}, ${selectedCity.lon})',
+                    style: TextStyle(color: Colors.grey[700], fontSize: 12),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context),
+                  child: const Text('Close'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
   }
 
   @override
@@ -2199,10 +2421,18 @@ class _SettingsPageState extends State<SettingsPage> {
                   _SettingsTile(
                     icon: Icons.location_city,
                     title: AppLocalizations.of(context)?.location ?? 'Location',
-                    subtitle:
-                        AppLocalizations.of(context)?.milanItaly ??
-                        'Milan, Italy',
-                    onTap: () {},
+                    subtitle: LocationPreferences.instance.useCurrentLocation
+                        ? (AppLocation.instance.displayName) // GPS
+                        : supportedCities
+                              .firstWhere(
+                                (c) =>
+                                    c.key ==
+                                    LocationPreferences.instance.cityKey,
+                                orElse: () => supportedCities.first,
+                              )
+                              .name,
+
+                    onTap: () => _showLocationDialog(context),
                   ),
                   _SettingsTile(
                     icon: Icons.my_location,
