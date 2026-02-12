@@ -48,13 +48,18 @@ class _SimplifiedMapPageState extends State<SimplifiedMapPage> {
   Timer? _prefsPollTimer;
   bool _lastUseGps = false;
   String _lastCityKey = 'milan';
+  // ✅ 演示稳定版：本地缓存（不走 Overpass）
+  final Map<String, List<HealthZone>> _zonesCache = {};
 
   @override
   void initState() {
     super.initState();
+
+    // ✅ 先把所有城市圈圈缓存好（不联网）
+    _precacheAllZones();
+
     _initFromPrefsThenLoad();
 
-    // ✅ 你不用会打印：我用轮询自动同步 settings 的变化
     _prefsPollTimer = Timer.periodic(const Duration(milliseconds: 600), (_) {
       _syncIfPrefsChanged();
     });
@@ -132,6 +137,79 @@ class _SimplifiedMapPageState extends State<SimplifiedMapPage> {
     // 2) 如果开了 GPS：不自动跳你当前位置（保持你原来“点按钮才定位”的行为）
     //    ✅ 但圈圈：我们会在 _zonesForCurrentSelection() 里强制返回 milan 圈圈
     await _loadHealthData();
+  }
+
+  void _precacheAllZones() {
+    // Milan：用你现成的
+    _zonesCache['milan'] = _milanHealthService.getHealthZones();
+
+    // 其它城市：用你现成的模板生成器（就是你写的 _zonesForCurrentSelection 逻辑）
+    for (final c in supportedCities) {
+      if (c.key == 'milan') continue;
+
+      final base = LatLng(c.lat, c.lon);
+      LatLng o(double dLat, double dLon) =>
+          LatLng(base.latitude + dLat, base.longitude + dLon);
+
+      _zonesCache[c.key] = [
+        HealthZone(
+          id: '${c.key}_park_1',
+          name: '${c.name.split(",").first} Park A',
+          center: o(0.010, -0.010),
+          radius: 900.0,
+          healthScore: 88,
+          type: HealthZoneType.park,
+          description: 'Green area (demo template).',
+          bestTimes: const ['06:00-09:00', '17:00-20:00'],
+          recommendations: const ['Good for walking', 'Prefer morning/evening'],
+        ),
+        HealthZone(
+          id: '${c.key}_park_2',
+          name: '${c.name.split(",").first} Park B',
+          center: o(-0.012, 0.008),
+          radius: 700.0,
+          healthScore: 84,
+          type: HealthZoneType.park,
+          description: 'Secondary green space (demo template).',
+          bestTimes: const ['07:00-10:00', '16:00-19:00'],
+          recommendations: const ['Light exercise', 'Avoid rush hours'],
+        ),
+        HealthZone(
+          id: '${c.key}_residential',
+          name: '${c.name.split(",").first} Residential',
+          center: o(0.006, 0.012),
+          radius: 650.0,
+          healthScore: 70,
+          type: HealthZoneType.residential,
+          description: 'Residential area (demo template).',
+          bestTimes: const ['07:00-10:00', '15:00-18:00'],
+          recommendations: const ['Nice for slow walks'],
+        ),
+        HealthZone(
+          id: '${c.key}_commercial',
+          name: '${c.name.split(",").first} Center',
+          center: o(-0.004, -0.002),
+          radius: 550.0,
+          healthScore: 55,
+          type: HealthZoneType.commercial,
+          description: 'Commercial center (demo template).',
+          bestTimes: const ['08:00-10:00', '14:00-16:00'],
+          recommendations: const ['Short visits recommended'],
+        ),
+        HealthZone(
+          id: '${c.key}_traffic',
+          name: '${c.name.split(",").first} Traffic Hub',
+          center: o(0.014, 0.004),
+          radius: 700.0,
+          healthScore: 42,
+          type: HealthZoneType.traffic,
+          description: 'High traffic area (demo template).',
+          bestTimes: const ['22:00-06:00'],
+          recommendations: const ['Minimize exposure time', 'Consider a mask'],
+          warnings: const ['Likely crowded at peak hours'],
+        ),
+      ];
+    }
   }
 
   // ------------------------
@@ -257,18 +335,15 @@ class _SimplifiedMapPageState extends State<SimplifiedMapPage> {
         _healthZones = _milanHealthService.getHealthZones();
         _recommendations = _milanHealthService.getCurrentRecommendations();
       } else {
-        _healthZones = await OtherCitiesHealthZoneService.instance.buildZones(
-          cityKey: city.key,
-          cityName: city.name.split(',').first,
-          center: LatLng(city.lat, city.lon),
-        );
+        // ✅ 演示稳定版：不走 Overpass，不联网，直接用缓存模板
+        _healthZones = _zonesCache[city.key] ?? <HealthZone>[];
         _recommendations = const <ActivityRecommendation>[];
       }
 
       setState(() => _loading = false);
     } catch (e) {
       setState(() {
-        _error = e.toString();
+        _error = 'Data temporarily unavailable. Please tap refresh.';
         _loading = false;
       });
     }
